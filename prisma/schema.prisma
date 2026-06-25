@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum DocumentSource {
+  MANUAL_TEXT
+  TXT
+  PDF
+  DOCX
+}
+
+enum QuizMode {
+  QUICK_REVIEW
+  DEEP_DIVE
+  EXAM
+  FEYNMAN
+  FLASHCARDS
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  FILL_BLANK
+  SHORT_ANSWER
+  FLASHCARD
+}
+
+enum FlashcardRating {
+  MISS
+  ALMOST
+  GOT_IT
+}
+
+model Document {
+  id               String        @id @default(cuid())
+  title            String
+  sourceType       DocumentSource
+  originalFileName String?
+  mimeType         String?
+  rawText          String
+  cleanedText      String
+  chunkCount       Int
+  createdAt        DateTime      @default(now())
+  sessions         QuizSession[]
+}
+
+model QuizSession {
+  id                  String          @id @default(cuid())
+  documentId          String
+  mode                QuizMode
+  title               String
+  questionCount       Int
+  answeredCount       Int             @default(0)
+  score               Int?
+  correctCount        Int             @default(0)
+  wrongCount          Int             @default(0)
+  weakTopicsJson      String          @default("[]")
+  recommendationsJson String          @default("[]")
+  completedAt         DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  document            Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  questions           Question[]
+  answerAttempts      AnswerAttempt[]
+}
+
+model Question {
+  id              String          @id @default(cuid())
+  sessionId       String
+  type            QuestionType
+  position        Int
+  prompt          String
+  topic           String
+  choicesJson     String?
+  correctAnswer   String?
+  explanation     String?
+  rubric          String?
+  referenceAnswer String?
+  session         QuizSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  answerAttempts  AnswerAttempt[]
+
+  @@unique([sessionId, position])
+}
+
+model AnswerAttempt {
+  id             String           @id @default(cuid())
+  sessionId      String
+  questionId     String
+  responseText   String?
+  selfAssessment FlashcardRating?
+  isCorrect      Boolean?
+  score          Float?
+  feedback       String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  question       Question         @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  session        QuizSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, questionId])
+}
