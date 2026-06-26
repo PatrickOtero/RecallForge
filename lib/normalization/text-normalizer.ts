@@ -1,5 +1,3 @@
-import "server-only";
-
 export interface TextSection {
   title: string;
   index: number;
@@ -7,8 +5,11 @@ export interface TextSection {
   content: string;
 }
 
+const mojibakeArtifactMatcher = /(?:Ã.|Â.|â[\u0080-\u00BF]{1,2}|�|ï¿½)/gu;
+const mojibakeRunMatcher = /(?:Ã.|Â.|â[\u0080-\u00BF]{1,2}|ï¿½)+/gu;
+
 function normalizeDashes(value: string) {
-  return value.replace(/[â€“â€”–—]/g, "-");
+  return value.replace(/(?:Ã¢â‚¬â€œ|Ã¢â‚¬â€|â€“|â€”|–|—)/g, "-");
 }
 
 function normalizeBullets(value: string) {
@@ -17,18 +18,38 @@ function normalizeBullets(value: string) {
     .replace(/[>\u2022\u25ba\u25cf\u25e6\u27a2\u00bb\u00b7\u2023\u2043\uf0d8]/gmu, " ");
 }
 
-function repairMojibake(value: string) {
-  const suspiciousSequences = ["Ã", "â€", "â€“", "â€”", "â€œ", "â€", "â€¢"];
-  if (!suspiciousSequences.some((sequence) => value.includes(sequence))) {
-    return value;
-  }
+function countMojibakeArtifacts(value: string) {
+  return value.match(mojibakeArtifactMatcher)?.length ?? 0;
+}
 
+function repairMojibakeRun(value: string) {
   try {
-    const repaired = Buffer.from(value, "latin1").toString("utf8");
+    const repaired = Buffer.from(value, "latin1").toString("utf8").normalize("NFC");
     return repaired.includes("�") ? value : repaired;
   } catch {
     return value;
   }
+}
+
+function repairMojibake(value: string) {
+  let current = value.normalize("NFC");
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const currentArtifacts = countMojibakeArtifacts(current);
+    if (currentArtifacts === 0) {
+      break;
+    }
+
+    const repaired = current.replace(mojibakeRunMatcher, repairMojibakeRun);
+    const repairedArtifacts = countMojibakeArtifacts(repaired);
+    if (repairedArtifacts >= currentArtifacts) {
+      break;
+    }
+
+    current = repaired;
+  }
+
+  return current;
 }
 
 function repairBrokenPortugueseWords(value: string) {
@@ -48,7 +69,8 @@ export function cleanExtractedText(value: string) {
     .replace(/[ \u00A0]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ ]+\n/g, "\n")
-    .trim();
+    .trim()
+    .normalize("NFC");
 }
 
 export function getMeaningfulLines(value: string) {
