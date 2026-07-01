@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, LoaderCircle } from "lucide-react";
 
 import { DiscursiveQuestion } from "@/components/DiscursiveQuestion";
 import { FillBlankQuestion } from "@/components/FillBlankQuestion";
@@ -21,12 +21,13 @@ import type {
 
 interface QuizRunnerProps {
   onComplete: (summary: QuizResultSummary) => void;
+  onExit: () => void;
   session: QuizSession;
 }
 
 type AttemptMap = Record<string, AnswerAttempt>;
 
-export function QuizRunner({ onComplete, session }: QuizRunnerProps) {
+export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
   const [attempts, setAttempts] = useState<AttemptMap>({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +61,7 @@ export function QuizRunner({ onComplete, session }: QuizRunnerProps) {
     setIsSubmitting(false);
 
     if (!response.ok) {
-      setError(data.error ?? "Não conseguimos guardar sua resposta.");
+      setError(data.error ?? "Nao conseguimos guardar sua resposta.");
       return;
     }
 
@@ -82,7 +83,7 @@ export function QuizRunner({ onComplete, session }: QuizRunnerProps) {
     setIsCompleting(false);
 
     if (!response.ok) {
-      setError(data.error ?? "Não conseguimos fechar essa rodada.");
+      setError(data.error ?? "Nao conseguimos fechar essa rodada.");
       return;
     }
 
@@ -157,11 +158,24 @@ export function QuizRunner({ onComplete, session }: QuizRunnerProps) {
 
   return (
     <div className="space-y-6">
-      {session.generationNote ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {session.generationNote}
-        </div>
-      ) : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {session.generationNote ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {session.generationNote}
+          </div>
+        ) : (
+          <div />
+        )}
+
+        <button
+          type="button"
+          onClick={onExit}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Voltar ao inicio
+        </button>
+      </div>
 
       <div className="rounded-[2rem] border border-white/70 bg-white/75 p-6 shadow-[0_25px_80px_rgba(15,23,42,0.08)]">
         <QuizProgress
@@ -198,7 +212,7 @@ export function QuizRunner({ onComplete, session }: QuizRunnerProps) {
               onClick={() => setCurrentIndex((value) => value + 1)}
               className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:bg-slate-800"
             >
-              Próxima pergunta
+              Proxima pergunta
               <ArrowRight className="h-4 w-4" />
             </button>
           ) : (

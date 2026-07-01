@@ -1,7 +1,7 @@
 "use client";
 
 import { useDeferredValue, useState } from "react";
-import { FileText, Sparkles, Upload } from "lucide-react";
+import { FileText, Upload } from "lucide-react";
 
 import type { IngestDocumentResponse } from "@/lib/types";
 import { cn, getUnsupportedFileMessage } from "@/lib/utils";
@@ -63,7 +63,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
     setIsSubmitting(false);
 
     if (!response.ok) {
-      setError(payload.error ?? "Não foi possível analisar o material.");
+      setError(payload.error ?? "Nao foi possivel analisar o material.");
       return;
     }
 
@@ -72,6 +72,11 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="space-y-2">
+        <h2 className="text-xl font-semibold tracking-tight text-slate-900">Material de estudo</h2>
+        <p className="text-sm text-slate-600">Cole o texto ou envie um arquivo para montar o questionario.</p>
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -105,13 +110,13 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Ex.: Capítulo 3 - Fotossíntese"
+            placeholder="Ex.: Capitulo 3 - Fotossintese"
             className="w-full rounded-3xl border border-white/70 bg-white/80 px-5 py-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
           />
         </label>
 
         <div className="rounded-3xl border border-white/70 bg-white/65 px-5 py-4 shadow-sm">
-          <p className="text-sm font-semibold text-slate-700">Você pode usar</p>
+          <p className="text-sm font-semibold text-slate-700">Formatos aceitos</p>
           <p className="mt-2 text-sm leading-6 text-slate-500">
             Texto colado ou upload de <span className="font-semibold text-slate-700">.txt</span>,{" "}
             <span className="font-semibold text-slate-700">.pdf</span> e{" "}
@@ -128,8 +133,8 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
                 <FileText className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-800">Cole o material de estudo</p>
-                <p className="text-xs text-slate-500">Quanto mais completo o texto, melhor fica a rodada de revisão.</p>
+                <p className="text-sm font-semibold text-slate-800">Cole o material</p>
+                <p className="text-xs text-slate-500">Use resumo, questionario, apostila ou anotacoes.</p>
               </div>
             </div>
             <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
@@ -140,7 +145,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
           <textarea
             value={manualText}
             onChange={(event) => setManualText(event.target.value)}
-            placeholder="Cole aqui suas anotações, capítulo, resumo de aula ou qualquer texto-base."
+            placeholder="Cole aqui suas perguntas e respostas, anotacoes, apostila ou texto-base."
             className="mt-4 min-h-72 w-full resize-none rounded-[1.5rem] border border-slate-100 bg-white px-5 py-4 text-sm leading-7 text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
           />
         </div>
@@ -157,10 +162,8 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
               <Upload className="h-7 w-7" />
             </div>
             <div className="space-y-2">
-              <p className="text-base font-semibold text-slate-800">{file ? file.name : "Escolha um arquivo para começar"}</p>
-              <p className="text-sm text-slate-500">
-                O RecallForge lê o conteúdo e prepara os modos de estudo automaticamente.
-              </p>
+              <p className="text-base font-semibold text-slate-800">{file ? file.name : "Escolha um arquivo"}</p>
+              <p className="text-sm text-slate-500">O arquivo sera lido para montar as opcoes de estudo.</p>
             </div>
             <div className="rounded-full bg-cyan-50 px-4 py-2 text-xs font-semibold text-cyan-700">
               Formatos suportados: TXT, PDF e DOCX
@@ -174,16 +177,13 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
       ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3 text-sm text-slate-500">
-          <Sparkles className="h-4 w-4 text-amber-500" />
-          Perguntas criadas a partir dos pontos mais importantes do texto.
-        </div>
+        <div className="text-sm text-slate-500">O material sera analisado antes da geracao das perguntas.</div>
         <button
           type="submit"
           disabled={pending}
           className="inline-flex items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70"
         >
-          {pending ? "Preparando material..." : "Preparar modos de estudo"}
+          {pending ? "Preparando material..." : "Continuar"}
         </button>
       </div>
     </form>

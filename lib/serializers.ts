@@ -49,6 +49,7 @@ export function serializeQuestion(question: PrismaQuestion): Question {
   if (question.type === "SHORT_ANSWER") {
     return {
       ...baseQuestion,
+      expectedAnswer: question.correctAnswer ?? undefined,
       rubric: question.rubric ?? undefined,
       referenceAnswer: question.referenceAnswer ?? undefined,
     };
@@ -57,7 +58,8 @@ export function serializeQuestion(question: PrismaQuestion): Question {
   if (question.type === "FLASHCARD") {
     return {
       ...baseQuestion,
-      referenceAnswer: question.referenceAnswer ?? question.correctAnswer ?? undefined,
+      expectedAnswer: question.correctAnswer ?? undefined,
+      referenceAnswer: question.referenceAnswer ?? undefined,
     };
   }
 

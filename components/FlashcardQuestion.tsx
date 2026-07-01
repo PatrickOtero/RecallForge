@@ -36,14 +36,25 @@ export function FlashcardQuestion({
           onClick={() => setRevealed(true)}
           className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Revelar resposta sugerida
+          Revelar verso do card
         </button>
       ) : null}
 
       {revealed ? (
-        <div className="rounded-[1.75rem] border border-cyan-100 bg-cyan-50/80 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">Trecho de referencia</p>
-          <p className="mt-3 text-sm leading-7 text-slate-700">{question.referenceAnswer ?? "Sem resposta sugerida."}</p>
+        <div className="space-y-3 rounded-[1.75rem] border border-cyan-100 bg-cyan-50/80 p-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">Resposta esperada</p>
+            <p className="mt-3 text-sm leading-7 text-slate-700">
+              {question.expectedAnswer ?? "Sem resposta sugerida."}
+            </p>
+          </div>
+
+          {question.referenceAnswer ? (
+            <div className="border-t border-cyan-100 pt-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">Trecho de apoio</p>
+              <p className="mt-2 text-sm leading-7 text-slate-700">{question.referenceAnswer}</p>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

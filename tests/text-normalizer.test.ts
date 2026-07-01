@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { cleanExtractedText } from "@/lib/normalization/text-normalizer";
 
-test("preserva unicode válido e repara mojibake óbvio sem requebrar texto correto", () => {
+test("preserva unicode valido, remove simbolos quebrados e nao estraga acentos corretos", () => {
   const simpleMojibake = Buffer.from("é", "utf8").toString("latin1");
   const doubleMojibake = Buffer.from(simpleMojibake, "utf8").toString("latin1");
 
@@ -19,4 +19,6 @@ test("preserva unicode válido e repara mojibake óbvio sem requebrar texto corr
   );
   assert.equal(cleanExtractedText(`O que ${simpleMojibake} Inventário?`), "O que é Inventário?");
   assert.equal(cleanExtractedText(`O que ${doubleMojibake} Inventário?`), "O que é Inventário?");
+  assert.equal(cleanExtractedText("Oferta âˆƒ Todos os produtos"), "Oferta Todos os produtos");
+  assert.equal(cleanExtractedText("Texto\u0000 com\u200B ruído"), "Texto com ruído");
 });

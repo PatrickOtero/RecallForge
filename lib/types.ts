@@ -70,6 +70,7 @@ export interface Question {
   prompt: string;
   topic: string;
   choices?: QuestionChoice[];
+  expectedAnswer?: string;
   rubric?: string;
   referenceAnswer?: string;
 }

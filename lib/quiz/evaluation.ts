@@ -6,20 +6,25 @@ import type {
   QuestionForEvaluation,
   QuizResultSummary,
 } from "@/lib/types";
+import {
+  conceptSimilarity,
+  uniqueConceptTokens,
+} from "@/lib/quiz/concept-utils";
 import { clamp, normalizeForComparison, roundScore } from "@/lib/utils";
 
-function extractEvaluationKeywords(question: QuestionForEvaluation) {
-  const source = `${question.topic} ${question.referenceAnswer ?? ""} ${question.rubric ?? ""}`;
-  const words = source.match(/[\p{L}]{4,}/gu) ?? [];
-
-  return Array.from(
-    new Set(
-      words
-        .map((word) => normalizeForComparison(word))
-        .filter((word) => word.length >= 4),
-    ),
-  ).slice(0, 6);
-}
+const weakConcepts = new Set([
+  "ajuda",
+  "central",
+  "coisa",
+  "forma",
+  "ideia",
+  "momento",
+  "parte",
+  "ponto",
+  "principal",
+  "processo",
+  "tipo",
+]);
 
 function compareObjectiveAnswer(expected: string, provided: string) {
   return normalizeForComparison(expected) === normalizeForComparison(provided);
@@ -37,6 +42,56 @@ function scoreFlashcard(rating: FlashcardRating) {
   return 0;
 }
 
+function extractCoreConcepts(question: QuestionForEvaluation) {
+  const expectedText = question.correctAnswer ?? question.referenceAnswer ?? "";
+  const expectedTokens = uniqueConceptTokens(expectedText);
+  const topicTokens = new Set(uniqueConceptTokens(question.topic));
+
+  let filtered = expectedTokens.filter((token) => !weakConcepts.has(token) && !topicTokens.has(token));
+  if (filtered.length < 2) {
+    filtered = expectedTokens.filter((token) => !weakConcepts.has(token));
+  }
+
+  return filtered.slice(0, 5);
+}
+
+function scoreShortAnswer(question: QuestionForEvaluation, responseText: string) {
+  const safeResponse = responseText.trim();
+  const expectedText = question.correctAnswer ?? question.referenceAnswer ?? "";
+  const responseTokens = new Set(uniqueConceptTokens(safeResponse));
+  const coreConcepts = extractCoreConcepts(question);
+  const matchedCoreConcepts = coreConcepts.filter((concept) => responseTokens.has(concept));
+  const conceptCoverage =
+    coreConcepts.length === 0 ? 0 : matchedCoreConcepts.length / Math.max(2, coreConcepts.length);
+  const semanticSimilarity = conceptSimilarity(expectedText, safeResponse);
+  let score = clamp(Math.max(conceptCoverage, semanticSimilarity * 0.92), 0, 1);
+
+  const recoveredCentralIdea =
+    matchedCoreConcepts.length >= Math.min(3, coreConcepts.length) ||
+    (matchedCoreConcepts.length >= 2 && semanticSimilarity >= 0.45);
+
+  if (recoveredCentralIdea) {
+    score = Math.max(score, 0.78);
+  }
+
+  const feedback =
+    score >= 0.7
+      ? matchedCoreConcepts.length > 0
+        ? `Boa resposta. Voce recuperou a ideia central: ${matchedCoreConcepts.join(", ")}.`
+        : "Boa resposta. A ideia central apareceu com suas palavras."
+      : matchedCoreConcepts.length > 0
+        ? `Boa base. Voce recuperou ${matchedCoreConcepts.join(", ")}. Compare com a resposta esperada para fechar os detalhes.`
+        : "Vale revisar este ponto e tentar recuperar melhor a ideia central com suas palavras.";
+
+  return {
+    responseText: safeResponse,
+    selfAssessment: null,
+    isCorrect: score >= 0.7,
+    score,
+    feedback,
+  };
+}
+
 export function evaluateAnswer(
   question: QuestionForEvaluation,
   responseText?: string,
@@ -47,38 +102,23 @@ export function evaluateAnswer(
     const score = scoreFlashcard(rating);
 
     return {
-      responseText: question.referenceAnswer ?? responseText ?? null,
+      responseText: question.correctAnswer ?? responseText ?? null,
       selfAssessment: rating,
       isCorrect: rating === "GOT_IT",
       score,
       feedback:
         rating === "GOT_IT"
-          ? "Muito bem. Esse ponto parece firme na memória."
+          ? "Muito bem. Esse ponto parece firme na memoria."
           : rating === "ALMOST"
-            ? "Quase lá. Compare sua lembrança com o trecho de referência."
-            : "Vale revisar este trecho e tentar explicar de novo com suas palavras.",
+            ? "Quase la. Compare sua lembranca com a resposta esperada e o trecho de apoio."
+            : "Vale revisar a resposta esperada e depois conferir o trecho de apoio.",
     };
   }
 
   const safeResponse = (responseText ?? "").trim();
 
   if (question.type === "SHORT_ANSWER") {
-    const keywords = extractEvaluationKeywords(question);
-    const normalizedResponse = normalizeForComparison(safeResponse);
-    const matched = keywords.filter((keyword) => normalizedResponse.includes(keyword));
-    const denominator = Math.max(2, Math.min(5, keywords.length || 2));
-    const score = clamp(matched.length / denominator, 0, 1);
-
-    return {
-      responseText: safeResponse,
-      selfAssessment: null,
-      isCorrect: score >= 0.7,
-      score,
-      feedback:
-        matched.length > 1
-          ? `Boa resposta. Você recuperou bem ${matched.join(", ")}.`
-          : `Quase lá. Vale retomar ${keywords.slice(0, 3).join(", ")} ao revisar esse ponto.`,
-    };
+    return scoreShortAnswer(question, safeResponse);
   }
 
   const isCorrect = compareObjectiveAnswer(question.correctAnswer ?? "", safeResponse);
@@ -89,8 +129,8 @@ export function evaluateAnswer(
     isCorrect,
     score: isCorrect ? 1 : 0,
     feedback: isCorrect
-      ? "Resposta correta. Você recuperou bem a ideia principal."
-      : question.explanation ?? "Ainda não foi dessa vez. Revise o trecho e compare com a ideia principal.",
+      ? "Resposta correta. Voce recuperou bem a ideia principal."
+      : question.explanation ?? "Ainda nao foi dessa vez. Revise a resposta esperada e compare com a ideia principal.",
   };
 }
 

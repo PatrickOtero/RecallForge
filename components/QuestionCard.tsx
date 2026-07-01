@@ -68,9 +68,15 @@ export function QuestionCard({ attempt, children, question, showImmediateFeedbac
                   ? attempt?.feedback ?? "Resposta recebida."
                   : "Sua resposta fica guardada e o resultado aparece no final da rodada."}
               </p>
+              {showImmediateFeedback && question.expectedAnswer ? (
+                <p className="text-slate-600">
+                  <span className="font-semibold text-slate-700">Resposta esperada:</span>{" "}
+                  {question.expectedAnswer}
+                </p>
+              ) : null}
               {showImmediateFeedback && question.referenceAnswer ? (
                 <p className="text-slate-600">
-                  <span className="font-semibold text-slate-700">Trecho de referência:</span>{" "}
+                  <span className="font-semibold text-slate-700">Trecho de apoio:</span>{" "}
                   {question.referenceAnswer}
                 </p>
               ) : null}

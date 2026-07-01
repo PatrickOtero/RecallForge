@@ -9,54 +9,74 @@ import {
   extractSections,
   type TextSection,
 } from "@/lib/normalization/text-normalizer";
-import { normalizeForComparison, titleCase } from "@/lib/utils";
+import {
+  buildPromptSignature,
+  conceptSimilarity,
+  extractReferenceKeywords,
+  uniqueConceptTokens,
+} from "@/lib/quiz/concept-utils";
 import type { GeneratedQuiz, QuizGenerator } from "@/lib/quiz/generator-interface";
+import { normalizeForComparison, titleCase } from "@/lib/utils";
 
-type UnitCategory =
+type KnowledgeKind =
   | "definition"
   | "purpose"
+  | "rule"
+  | "procedure"
   | "formula"
   | "comparison"
-  | "procedure"
-  | "risk"
-  | "fact";
+  | "list";
 
 interface KnowledgeUnit {
   id: string;
-  category: UnitCategory;
-  subject: string;
-  answer: string;
-  statement: string;
   topic: string;
+  sourceText: string;
+  kind: KnowledgeKind;
+  expectedAnswer: string;
+  referenceExcerpt: string;
+  keywords: string[];
   sectionTitle: string;
   sectionIndex: number;
   importance: number;
-  relatedTerms: string[];
-  listItems?: string[];
-  sourceExcerpt: string;
 }
 
 interface DocumentAnalysis {
   emphasis: string[];
   sections: TextSection[];
   units: KnowledgeUnit[];
-}
-
-interface ChoiceCandidate {
-  label: string;
-  unit: KnowledgeUnit;
+  structuredQuestions: ParsedStructuredQuestion[];
 }
 
 interface GeneratedQuestionCandidate {
   question: QuestionDraft;
   unit: KnowledgeUnit;
-  distractorUnits: KnowledgeUnit[];
 }
 
-interface QuestionQualityResult {
-  valid: boolean;
-  score: number;
-  reasons: string[];
+type StructuredPromptStyle = "QUESTION" | "TRUE_FALSE" | "ASSOCIATION" | "FLASHCARD";
+
+type StructuredSectionKind = "DEFAULT" | "ASSOCIATION";
+
+export interface ParsedStructuredQuestion {
+  prompt: string;
+  expectedAnswer: string;
+  referenceExcerpt: string;
+  topic: string;
+  type: "SHORT_ANSWER";
+  sectionTitle: string;
+  sectionIndex: number;
+  promptStyle: StructuredPromptStyle;
+  associationGroup?: string;
+  associationItem?: string;
+}
+
+interface WorkingStructuredQuestion {
+  promptLines: string[];
+  answerLines: string[];
+  sectionTitle: string;
+  sectionIndex: number;
+  promptStyle: StructuredPromptStyle;
+  answerStarted: boolean;
+  associationGroup?: string;
 }
 
 const targetQuestionCounts: Record<QuizMode, number> = {
@@ -67,299 +87,454 @@ const targetQuestionCounts: Record<QuizMode, number> = {
   FLASHCARDS: 20,
 };
 
-const weakWords = new Set([
-  "ajuda",
-  "algum",
-  "alguma",
-  "area",
-  "cliente",
-  "coisa",
-  "dados",
-  "dias",
-  "forma",
-  "itens",
-  "item",
-  "local",
-  "loja",
-  "material",
-  "muito",
-  "parte",
-  "ponto",
-  "pontos",
-  "processo",
-  "processos",
-  "produto",
-  "produtos",
-  "relacao",
-  "rotina",
-  "sistema",
-  "tarefa",
-  "quanto",
-  "valor",
-  "valores",
-]);
-
-const stopWords = new Set([
-  "a",
-  "ao",
-  "aos",
-  "as",
-  "com",
-  "como",
-  "da",
-  "das",
-  "de",
-  "do",
-  "dos",
-  "e",
-  "em",
-  "entre",
-  "essa",
-  "esse",
-  "esta",
-  "este",
-  "isso",
-  "na",
-  "nas",
-  "no",
-  "nos",
-  "o",
-  "os",
-  "ou",
-  "para",
-  "por",
-  "que",
-  "se",
-  "sem",
-  "ser",
-  "sua",
-  "suas",
-  "seu",
-  "seus",
-  "um",
-  "uma",
-  "umas",
-  "uns",
-]);
-
-const purposeMatchers = [
-  /\b(.{4,90}?)\s+serve para\s+(.{12,220})$/i,
-  /\b(.{4,90}?)\s+permite\s+(.{12,220})$/i,
-  /\b(.{4,90}?)\s+visa\s+(.{12,220})$/i,
-  /\b(.{4,90}?)\s+(?:(?:e|é|eh)\s+)?utilizad[oa] para\s+(.{12,220})$/i,
-  /\b(.{4,90}?)\s+ajuda a\s+(.{12,220})$/i,
-];
-
-const listTitleMatcher = /\b(procedimentos?|etapas?|passos?|cuidados?|motivos?|relatorios?|planejamento|recebimento|verificacao|inventario)\b/i;
-const riskMatcher = /\b(risco|impacto|ruptura|afeta|afetam|consequentemente|gera|geram|leva|levam|resulta|resultam|cliente insatisfeito)\b/i;
-const formulaMatcher = /\b(calculo|formula|equacao|percentual)\b/i;
-const comparisonMatcher = /\b(diferenca entre|diferenciar|comparacao|comparado com|em comparacao com|versus)\b/i;
-const acronymMatcher = /\b([A-Z]{2,5})\s*[:=-]\s*([^=]{4,160})$/;
-const preferredPurposeSubjectMatcher = /\b(relatorio|ferramenta|sistema|planejamento|inventario|alocacao|roteiro|manual)\b/i;
-const genericFormulaSubjectMatcher = /^(calculo|formula|equacao)$/i;
-const definitionStylePromptMatcher = /^o que e\s+/i;
-const contextDependencyMatcher =
-  /\b(abaixo|acima|a seguir|na figura|na tabela|no quadro|na imagem|conforme figura|conforme tabela|como mostra|como mostrado|vide|neste exemplo)\b/i;
-const brokenPromptMatcher = /^o que e\s+(toda|todo|este|esta|isso|abaixo|para isso)\b/i;
-const sentenceLeadMatcher =
-  /^(?:toda|todo|isso|isto|esta|este|estes|essas|esse|essa|aquele|aquela|aqueles|abaixo|para isso|um fator|uma forma|neste caso|nestes casos|nesse caso|nesses casos|quanto|muito)\b/i;
-const trailingPrepositionMatcher = /\b(a|ao|aos|com|da|das|de|do|dos|em|entre|na|nas|no|nos|para|por|sem|sobre)\s*$/i;
-const fragmentAnswerStartMatcher =
-  /^(a|o|os|as|um|uma|uns|umas|de|da|do|dos|das|para|por|com|sem|entre|ao|aos|na|nas|no|nos)\b/i;
-const directAnswerStartMatcher =
-  /^(e|eh|sao|significa|consiste|corresponde|refere|serve|permite|visa|ajuda|mostra|explica)\b/i;
-const inlineListDelimiterMatcher = /;\s*/;
-const importanceMatcher = /\b(importante|importancia|essencial|fundamental|relevante)\b/i;
-const impactMatcher = /\b(impacto|afeta|prejudica|reduz|aumenta|gera|leva|resulta)\b/i;
-const concreteImpactMatcher =
-  /\b(risco|ruptura|perda|perdas|insatisfacao|vencimento|prejudica|afeta diretamente|enfraquece|gera(?:ndo)? insatisfacao|leva a|resulta em)\b/i;
-const truncatedAnswerEndingMatcher =
-  /\b(a|ao|aos|as|com|da|das|de|do|dos|e|em|na|nas|no|nos|o|os|ou|para|por|que|se|sem|um|uma|uns|umas)\s*$/i;
-const genericOperationalSubjectMatcher =
-  /\b(setor|sistema|loja|produto|produtos|cliente|clientes)\b/i;
-const looseVerbLeadMatcher =
+const completeSentenceEndingMatcher = /[.!?]$/;
+const listLikeTitleMatcher = /\b(lista|itens|pontos|cuidados|etapas|passos|checklist)\b/i;
+const procedureLikeTitleMatcher = /\b(procedimento|processo|rotina|fluxo|recebimento|armazenagem|conferencia|inventario)\b/i;
+const truncatedHeadlineMatcher = /^\S+\s+(todo|todos|toda|todas)\b/i;
+const blockedStartMatcher =
+  /^(a|ao|aos|as|com|da|das|de|do|dos|e|em|na|nas|no|nos|para|por|sem)\b/i;
+const looseVerbStartMatcher =
   /^(verificar|analisar|disponibilizar|acompanhar|controlar|consultar|medir|registrar|alterar|efetuar|informar|exportar)\b/i;
 const systemNoiseMatcher =
-  /(?:^acesso:|>>|\brms\s*>>|\bzsintranet\s*>>|\bcampo de alteracao\b|\bexportar rms\b|\bmenu\b|\bbreadcrumb\b)/i;
-const sentenceEndingMatcher = /[.!?]$/;
+  /(^acesso:|>>|breadcrumb|menu|caminho do sistema|campo de alteracao|exportar rms|zsintranet|rms\b)/i;
+const brokenSymbolMatcher = /[âˆƒâ‰¡ï¿¾]/;
+const separatorLineMatcher = /^[-_=]{6,}$/;
+const structuredSectionMatcher =
+  /^(?:bloco|modulo|m[oó]dulo|tema|cap[ií]tulo|sec[aã]o|se[cç][aã]o)\s*\d*\s*[-–—:]?\s+(.+)$/i;
+const structuredAnswerMatcher = /^(?:resposta|resposta esperada|gabarito)\s*[:\-–—]?\s*(.*)$/i;
+const structuredQuestionLeadMatcher =
+  /^(?:\d+[\).]\s*)?(?:qual|quais|o que|que|como|quando|onde|por que|porque|quem|explique|cite|defina|associe|relacione|complete|verdadeiro ou falso|flashcards?)\b/i;
+const structuredAssociationInstructionMatcher =
+  /^(?:quest[oõ]es? de associa[cç][aã]o|associe(?: cada item)?(?: [aà] resposta correta)?|associa[cç][aã]o)\b/i;
+const metaInstructionMatcher =
+  /^(?:use da seguinte forma|instru[cç][oõ]es? de uso|como usar|tente responder sem olhar|confira o gabarito|refa[cç]a as perguntas erradas|reveja as perguntas erradas)\b/i;
+const blockedGeneratedPromptMatcher =
+  /^(?:resuma em uma frase o conceito de (?:qual|quais)\b|explique (?:qual|quais)\b|use da seguinte forma\b)/i;
+const definitionMatchers = [
+  /^(.{3,90}?)\s+(?:e|\u00e9|eh|sao|s\u00e3o|significa|corresponde a|refere-se a|refere se a|consiste em)\s+(.{12,260})$/i,
+];
+const purposeMatchers = [
+  /^(.{3,120}?)\s+(?:serve para|permite|visa|ajuda a)\s+(.{12,260})$/i,
+];
+const comparisonMatchers = [
+  /^a diferen(?:ca|\u00e7a) entre\s+(.{3,60}?)\s+e\s+(.{3,60}?)\s+(.{12,260})$/i,
+  /^(.{3,60}?)\s+e\s+(.{3,60}?)\s+se diferen(?:ciam|\u00e7iam)\s+(.{12,260})$/i,
+];
 
-function trimPunctuation(value: string) {
-  return value.replace(/^[\s,;:.\-–—"'`>•▪►]+|[\s,;:.\-–—"'`>•▪►]+$/g, "").trim();
-}
-
-function cleanTitle(title: string) {
-  return trimPunctuation(title.replace(/^\d+(\.\d+)*\s*[-:]?\s*/, ""));
-}
-
-function cleanSubject(value: string) {
-  return trimPunctuation(
-    value
-      .replace(/^(o|a|os|as)\s+/i, "")
-      .replace(/\s+(e|sao|eh)$/i, ""),
-  );
-}
-
-function cleanAnswer(value: string) {
-  return trimPunctuation(value.replace(/\s+/g, " "));
+function trimOuterPunctuation(value: string) {
+  return value
+    .replace(/^[\s,;:.!"'`()[\]{}<>-]+|[\s,;:.!"'`()[\]{}<>-]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function ensureSentence(value: string) {
-  const cleaned = cleanAnswer(value);
+  const cleaned = trimOuterPunctuation(value);
   if (!cleaned) {
     return cleaned;
   }
 
-  return sentenceEndingMatcher.test(cleaned) ? cleaned : `${cleaned}.`;
-}
-
-function cleanSectionSubject(value: string) {
-  return cleanTitle(value)
-    .replace(/\s+-\s+(?:serve para|a ferramenta\s+(?:visa|permite)|define-se como|o relatorio reflete|para analisa[rs]|para analise|esta etiqueta|diariamente).*/i, "")
-    .replace(/^importancia\s+d[aeo]s?\s+/i, "")
-    .trim();
-}
-
-function extractWords(value: string) {
-  return value.match(/[\p{L}]{4,}/gu) ?? [];
+  return completeSentenceEndingMatcher.test(cleaned) ? cleaned : `${cleaned}.`;
 }
 
 function countWords(value: string) {
   return value.split(/\s+/).filter(Boolean).length;
 }
 
+function splitIntoSentences(value: string) {
+  return value
+    .replace(/\n+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
 function looksLikeSystemNoise(value: string) {
-  const answer = cleanAnswer(value);
-  const normalized = normalizeForComparison(answer);
+  const cleaned = trimOuterPunctuation(value);
+  const normalized = normalizeForComparison(cleaned);
 
   return (
-    !answer ||
-    answer.includes(">>") ||
-    systemNoiseMatcher.test(normalized) ||
-    /^acesso:/i.test(answer) ||
-    /^[A-Z0-9/_ -]{2,}$/.test(answer)
+    !cleaned ||
+    systemNoiseMatcher.test(cleaned) ||
+    normalized.includes(" acesso ") ||
+    normalized.startsWith("acesso ") ||
+    normalized.includes(">>") ||
+    /^[A-Z0-9/_ -]{2,}$/.test(cleaned)
   );
 }
 
-function startsWithLooseVerb(value: string) {
-  return looseVerbLeadMatcher.test(normalizeForComparison(cleanAnswer(value)));
+function hasBrokenExtractionSymbols(value: string) {
+  return brokenSymbolMatcher.test(value);
 }
 
-function isStandaloneKnowledgeSentence(value: string) {
-  const answer = cleanAnswer(value);
-  const normalized = normalizeForComparison(answer);
+function startsLikeBadFragment(value: string) {
+  const cleaned = trimOuterPunctuation(value);
+  return blockedStartMatcher.test(cleaned) || looseVerbStartMatcher.test(cleaned);
+}
+
+function hasKnowledgeVerb(value: string) {
+  return (
+    /\b\p{L}+\s+\u00e9\s+/u.test(value) ||
+    /\b(eh|sao|significa|corresponde|consiste|refere|serve|permite|visa|ajuda|mede|mostra|indica|representa|gera|resulta|afeta|calcula|deve|devem|consegue)\b/i.test(
+      normalizeForComparison(value),
+    ) ||
+    value.includes("=")
+  );
+}
+
+function isCompleteKnowledgeText(value: string, allowVerbLead = false) {
+  const cleaned = ensureSentence(value);
 
   if (
-    answer.length < 24 ||
-    countWords(answer) < 6 ||
-    looksLikeSystemNoise(answer) ||
-    contextDependencyMatcher.test(normalized) ||
-    looksLikeParagraphContinuation(answer) ||
-    trailingPrepositionMatcher.test(answer)
+    cleaned.length < 24 ||
+    countWords(cleaned) < 6 ||
+    looksLikeSystemNoise(cleaned) ||
+    hasBrokenExtractionSymbols(cleaned)
   ) {
     return false;
   }
 
-  if (startsWithLooseVerb(answer) && !/^(serve|permite|visa|ajuda)\b/i.test(normalized)) {
+  if (!allowVerbLead && startsLikeBadFragment(cleaned)) {
     return false;
   }
 
-  return hasConjugatedVerb(answer) || sentenceEndingMatcher.test(answer);
+  if (!completeSentenceEndingMatcher.test(cleaned)) {
+    return false;
+  }
+
+  if (!allowVerbLead && !hasKnowledgeVerb(cleaned)) {
+    return false;
+  }
+
+  return uniqueConceptTokens(cleaned).length >= 3;
 }
 
-function looksLikeAcronymExpansion(value: string) {
-  const words = cleanAnswer(value).split(/\s+/).filter(Boolean);
-  if (words.length < 3 || words.length > 12) {
-    return false;
-  }
-
-  const significantWords = words.filter((word) => !stopWords.has(normalizeForComparison(word)));
-  if (significantWords.length < 3) {
-    return false;
-  }
-
-  const titledWords = significantWords.filter((word) => /^(?:\p{Lu}|[0-9])/u.test(word)).length;
-  return titledWords / significantWords.length >= 0.6;
-}
-
-function isExplicitAcronymDefinition(line: string, acronym: string, answer: string) {
-  const normalizedLine = normalizeForComparison(line);
-  const normalizedAcronym = normalizeForComparison(acronym);
-  const normalizedAnswer = normalizeForComparison(answer);
+function isUsefulTopic(value: string) {
+  const topic = trimOuterPunctuation(value);
+  const normalized = normalizeForComparison(topic);
+  const words = topic.split(/\s+/).filter(Boolean);
 
   if (
-    looksLikeSystemNoise(line) ||
-    normalizedAnswer.includes(normalizedAcronym) ||
-    startsWithLooseVerb(answer) ||
-    trailingPrepositionMatcher.test(answer)
+    topic.length < 3 ||
+    topic.length > 90 ||
+    words.length > 12 ||
+    looksLikeSystemNoise(topic) ||
+    hasBrokenExtractionSymbols(topic)
   ) {
     return false;
   }
 
-  return (
-    new RegExp(
-      `^${normalizedAcronym}\\s+(e|eh|significa|corresponde a|refere se a|sigla(?:\\s+(?:de|para))?|abreviatura(?:\\s+de)?)\\b`,
-      "i",
-    ).test(normalizedLine) || looksLikeAcronymExpansion(answer)
+  if (startsLikeBadFragment(topic) || /[:;,.!?]$/.test(topic)) {
+    return false;
+  }
+
+  if (/^(isso|isto|essa|esse|esta|este|abaixo|acima|mesmo|mesma)\b/i.test(topic)) {
+    return false;
+  }
+
+  if (/^(qual|quais|que|o que|como|quando|onde|por que|porque|quem)\b/i.test(topic)) {
+    return false;
+  }
+
+  if (truncatedHeadlineMatcher.test(topic)) {
+    return false;
+  }
+
+  if (/^[A-Z]{2,5}$/.test(topic)) {
+    return false;
+  }
+
+  return normalized.length >= 3;
+}
+
+function cleanSectionTitle(title: string) {
+  return trimOuterPunctuation(title.replace(/^\d+(\.\d+)*\s*[-:]?\s*/, ""));
+}
+
+function sanitizeStructuredLine(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function isSeparatorLine(value: string) {
+  return separatorLineMatcher.test(value);
+}
+
+function isMetaInstructionLine(value: string) {
+  return metaInstructionMatcher.test(normalizeForComparison(value));
+}
+
+function stripStructuredQuestionPrefix(value: string) {
+  return value.replace(/^\d+[\).]\s*/, "").trim();
+}
+
+function detectStructuredPromptStyle(value: string): StructuredPromptStyle {
+  const normalized = normalizeForComparison(value);
+
+  if (normalized.startsWith("verdadeiro ou falso")) {
+    return "TRUE_FALSE";
+  }
+
+  if (normalized.startsWith("associe") || normalized.startsWith("relacione")) {
+    return "ASSOCIATION";
+  }
+
+  if (normalized.startsWith("flashcard")) {
+    return "FLASHCARD";
+  }
+
+  return "QUESTION";
+}
+
+function isStructuredSectionTitle(value: string) {
+  return structuredSectionMatcher.test(value);
+}
+
+function isAssociationInstructionLine(value: string) {
+  return structuredAssociationInstructionMatcher.test(normalizeForComparison(value));
+}
+
+function getStructuredSectionKind(value: string): StructuredSectionKind {
+  return isAssociationInstructionLine(value) ? "ASSOCIATION" : "DEFAULT";
+}
+
+function normalizeStructuredSectionTitle(value: string) {
+  const matched = value.match(structuredSectionMatcher);
+  const raw = trimOuterPunctuation(matched?.[1] ?? value);
+  if (!raw) {
+    return "Questionario importado";
+  }
+
+  return titleCase(raw);
+}
+
+function parseStructuredAnswerLine(value: string) {
+  const matched = value.match(structuredAnswerMatcher);
+  if (!matched) {
+    return null;
+  }
+
+  return trimOuterPunctuation(matched[1] ?? "");
+}
+
+function isStructuredPromptLine(value: string) {
+  if (!value || isSeparatorLine(value) || isMetaInstructionLine(value)) {
+    return false;
+  }
+
+  const prompt = stripStructuredQuestionPrefix(value);
+  return prompt.endsWith("?") || structuredQuestionLeadMatcher.test(prompt);
+}
+
+function looksLikeStructuredPromptContinuation(value: string) {
+  if (!value || isSeparatorLine(value) || isMetaInstructionLine(value)) {
+    return false;
+  }
+
+  if (isStructuredPromptLine(value) || isStructuredSectionTitle(value) || parseStructuredAnswerLine(value) !== null) {
+    return false;
+  }
+
+  return value.length >= 12;
+}
+
+function isStructuredAssociationItemLine(value: string) {
+  if (!value || isSeparatorLine(value) || isMetaInstructionLine(value)) {
+    return false;
+  }
+
+  return /^\d+[\).]\s+\S+/.test(value);
+}
+
+function stripListMarker(value: string) {
+  return value.replace(/^[-*•]\s*/, "").trim();
+}
+
+function joinStructuredAnswerLines(lines: string[]) {
+  const cleaned = lines.map((line) => stripListMarker(trimOuterPunctuation(line))).filter(Boolean);
+  if (cleaned.length === 0) {
+    return "";
+  }
+
+  if (cleaned.length === 1) {
+    return ensureSentence(cleaned[0]);
+  }
+
+  return ensureSentence(cleaned.join("; "));
+}
+
+function inferStructuredTopic(prompt: string, answer: string, sectionTitle: string) {
+  if (sectionTitle && sectionTitle !== "Questionario importado" && isUsefulTopic(sectionTitle)) {
+    return sectionTitle;
+  }
+
+  const keywords = extractReferenceKeywords(`${prompt} ${answer}`, 4).filter(
+    (keyword) => !/^(qual|quais|que|como|onde|quando|porque|por)$/.test(keyword),
   );
+
+  if (keywords.length === 0) {
+    return "Questoes importadas";
+  }
+
+  return titleCase(keywords.slice(0, 2).join(" "));
 }
 
-function extractComparableTokens(value: string) {
-  return normalizeForComparison(value)
-    .split(/\s+/)
-    .filter((word) => word.length >= 3 && !stopWords.has(word));
+function finalizeStructuredQuestion(current: WorkingStructuredQuestion | null) {
+  if (!current || current.answerLines.length === 0) {
+    return null;
+  }
+
+  const prompt = trimOuterPunctuation(current.promptLines.join(" "));
+  const expectedAnswer = joinStructuredAnswerLines(current.answerLines);
+  const isAssociation = current.promptStyle === "ASSOCIATION";
+  if (!prompt || !expectedAnswer || (!prompt.endsWith("?") && current.promptStyle === "QUESTION")) {
+    return null;
+  }
+
+  return {
+    prompt,
+    expectedAnswer,
+    referenceExcerpt: isAssociation ? `${prompt} - ${expectedAnswer}` : `${prompt}\nResposta:\n${expectedAnswer}`,
+    topic: isAssociation ? current.sectionTitle : inferStructuredTopic(prompt, expectedAnswer, current.sectionTitle),
+    type: "SHORT_ANSWER",
+    sectionTitle: current.sectionTitle,
+    sectionIndex: current.sectionIndex,
+    promptStyle: current.promptStyle,
+    associationGroup: current.associationGroup,
+    associationItem: isAssociation ? prompt : undefined,
+  } satisfies ParsedStructuredQuestion;
 }
 
-function extractKeywords(value: string, limit = 24) {
-  const counts = new Map<string, { label: string; count: number }>();
+function dedupeStructuredQuestions(questions: ParsedStructuredQuestion[]) {
+  const seen = new Set<string>();
+  const deduped: ParsedStructuredQuestion[] = [];
 
-  for (const word of extractWords(value)) {
-    const normalized = normalizeForComparison(word);
-    if (normalized.length < 4 || stopWords.has(normalized)) {
+  for (const question of questions) {
+    const key = `${buildPromptSignature(question.prompt)}|${buildPromptSignature(question.expectedAnswer)}`;
+    if (seen.has(key)) {
       continue;
     }
 
-    const entry = counts.get(normalized);
-    if (entry) {
-      entry.count += 1;
-    } else {
-      counts.set(normalized, { label: word, count: 1 });
-    }
+    seen.add(key);
+    deduped.push(question);
   }
 
-  return Array.from(counts.entries())
-    .sort((left, right) => {
-      if (right[1].count === left[1].count) {
-        return left[0].localeCompare(right[0]);
+  return deduped;
+}
+
+export function parseStructuredQuestionnaire(text: string): ParsedStructuredQuestion[] {
+  const rawLines = text.split(/\r?\n/).map(sanitizeStructuredLine);
+  const questions: ParsedStructuredQuestion[] = [];
+  let sectionTitle = "Questionario importado";
+  let sectionIndex = 0;
+  let sectionKind: StructuredSectionKind = "DEFAULT";
+  let current: WorkingStructuredQuestion | null = null;
+
+  function pushCurrent() {
+    const parsed = finalizeStructuredQuestion(current);
+    if (parsed) {
+      questions.push(parsed);
+    }
+
+    current = null;
+  }
+
+  for (const rawLine of rawLines) {
+    const line = sanitizeStructuredLine(rawLine);
+    if (!line || isSeparatorLine(line)) {
+      continue;
+    }
+
+    if (isStructuredSectionTitle(line)) {
+      pushCurrent();
+      sectionTitle = normalizeStructuredSectionTitle(line);
+      sectionIndex += 1;
+      sectionKind = getStructuredSectionKind(line) === "ASSOCIATION" ? "ASSOCIATION" : "DEFAULT";
+      continue;
+    }
+
+    if (isAssociationInstructionLine(line)) {
+      pushCurrent();
+      sectionKind = "ASSOCIATION";
+      if (normalizeForComparison(sectionTitle) === normalizeForComparison("Questionario importado")) {
+        sectionTitle = "Questoes de associacao";
+      }
+      continue;
+    }
+
+    const inlineAnswer = parseStructuredAnswerLine(line);
+    if (inlineAnswer !== null) {
+      if (!current) {
+        continue;
       }
 
-      return right[1].count - left[1].count;
-    })
-    .slice(0, limit)
-    .map((entry) => entry[1].label);
-}
-
-function buildFrequencyMap(value: string) {
-  const counts = new Map<string, number>();
-
-  for (const word of extractWords(value)) {
-    const normalized = normalizeForComparison(word);
-    if (normalized.length < 4 || stopWords.has(normalized)) {
+      current.answerStarted = true;
+      if (inlineAnswer) {
+        current.answerLines.push(inlineAnswer);
+      }
       continue;
     }
 
-    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    if (isMetaInstructionLine(line) && !current?.answerStarted) {
+      continue;
+    }
+
+    if (sectionKind === "ASSOCIATION" && isStructuredAssociationItemLine(line)) {
+      pushCurrent();
+      current = {
+        promptLines: [stripStructuredQuestionPrefix(line)],
+        answerLines: [],
+        sectionTitle,
+        sectionIndex,
+        promptStyle: "ASSOCIATION",
+        answerStarted: false,
+        associationGroup: `${sectionIndex}:${normalizeForComparison(sectionTitle)}`,
+      };
+      continue;
+    }
+
+    if (isStructuredPromptLine(line)) {
+      pushCurrent();
+      current = {
+        promptLines: [stripStructuredQuestionPrefix(line)],
+        answerLines: [],
+        sectionTitle,
+        sectionIndex,
+        promptStyle: sectionKind === "ASSOCIATION" ? "ASSOCIATION" : detectStructuredPromptStyle(line),
+        answerStarted: false,
+        associationGroup: sectionKind === "ASSOCIATION" ? `${sectionIndex}:${normalizeForComparison(sectionTitle)}` : undefined,
+      };
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (!current.answerStarted && looksLikeStructuredPromptContinuation(line)) {
+      current.promptLines.push(line);
+      continue;
+    }
+
+    if (current.answerStarted) {
+      current.answerLines.push(line);
+    }
   }
 
-  return counts;
+  pushCurrent();
+  return dedupeStructuredQuestions(questions);
 }
 
-function buildTopic(sectionTitle: string, source: string) {
-  const title = cleanTitle(sectionTitle);
-  if (title && title !== "Visão geral") {
-    return title;
+export function detectStructuredQuestionnaire(text: string) {
+  return parseStructuredQuestionnaire(text).length >= 5;
+}
+
+function buildTopicFallback(section: TextSection, content: string) {
+  const cleanedTitle = cleanSectionTitle(section.title);
+  if (cleanedTitle && cleanedTitle !== "Visao geral" && isUsefulTopic(cleanedTitle)) {
+    return cleanedTitle;
   }
 
-  const keywords = extractKeywords(source, 3);
+  const keywords = extractReferenceKeywords(content, 3);
   if (keywords.length === 0) {
     return "Ideia central";
   }
@@ -367,977 +542,265 @@ function buildTopic(sectionTitle: string, source: string) {
   return titleCase(keywords.join(" "));
 }
 
-function splitIntoSentences(section: TextSection) {
-  return section.content
-    .replace(/\n+/g, " ")
-    .split(/(?<=[.!?])\s+/)
-    .map((text) => text.trim())
-    .filter((text) => text.length >= 40 && isStandaloneKnowledgeSentence(text))
-    .map((text) => ({
-      text,
-      sectionTitle: section.title,
-    }));
-}
-
-function hasSpecificWords(value: string) {
-  const words = extractWords(value)
-    .map((word) => normalizeForComparison(word))
-    .filter((word) => !stopWords.has(word));
-
-  if (words.length === 0) {
-    return false;
-  }
-
-  return words.some((word) => !weakWords.has(word)) || words.length >= 2;
-}
-
-function hasConjugatedVerb(value: string) {
-  const normalized = normalizeForComparison(value);
-  return normalized
-    .split(/\s+/)
-    .some((token) =>
-      /^(e|eh|sao|foi|foram|ser|tem|tinha|tiveram|vai|vao|gera|geram|leva|levam|afeta|afetam|permite|permitem|serve|servem|mostra|mostram|explica|explicam|calcula|calcula-se|define|define-se|chama|chamamos|corresponde|refere|consiste|depende|dependem|pode|podem|deve|devem)$/i.test(
-        token,
-      ),
-    );
-}
-
-function looksLikeParagraphContinuation(value: string) {
-  const normalized = normalizeForComparison(value);
-  return (
-    sentenceLeadMatcher.test(normalized) ||
-    contextDependencyMatcher.test(normalized) ||
-    /\bque\b/i.test(normalized) ||
-    /^(de|do|da|dos|das|para|por)\b/i.test(normalized)
-  );
-}
-
-function looksLikeClause(value: string) {
-  const normalized = normalizeForComparison(value);
-  return /\b(e|eh|sao)\s+(um|uma|o|a|os|as)\b|\b(permite|ajuda|serve|gera|leva|afeta|pode|deve|vai)\b/i.test(
-    normalized,
-  );
-}
-
-function isUsefulSubject(value: string) {
-  const subject = cleanSubject(value);
-  const words = subject.split(/\s+/).filter(Boolean);
-
-  if (subject.length < 4 || subject.length > 90 || words.length > 10 || looksLikeSystemNoise(subject)) {
-    return false;
-  }
-
-  if (/^(isso|isto|essa|esse|esta|este|ele|ela)\b/i.test(subject) || /[:;]/.test(subject)) {
-    return false;
-  }
-
-  if (looksLikeClause(subject)) {
-    return false;
-  }
-
-  return hasSpecificWords(subject);
-}
-
-function isValidConceptCandidate(value: string) {
-  const rawSubject = cleanSubject(value);
-  const normalizedInput = normalizeForComparison(value)
-    .replace(/^o que e\s+/i, "")
-    .replace(/^para que serve\s+/i, "")
-    .replace(/^como e calculado\s+/i, "")
-    .replace(/^qual e a diferenca entre\s+/i, "")
-    .replace(/^quais riscos ou impactos estao ligados a\s+/i, "")
-    .trim();
-  const subject =
-    normalizedInput && normalizedInput !== normalizeForComparison(rawSubject)
-      ? titleCase(normalizedInput)
-      : rawSubject;
-  const normalized = normalizeForComparison(subject);
-  const words = subject.split(/\s+/).filter(Boolean);
-  const blockedSubjects = new Set(["ideal", "impacto", "caso", "casos"]);
-
-  if (
-    subject.length < 4 ||
-    subject.length > 80 ||
-    words.length === 0 ||
-    words.length > 8 ||
-    looksLikeSystemNoise(subject)
-  ) {
-    return false;
-  }
-
-  if (words.length === 1 && subject === subject.toLowerCase()) {
-    return false;
-  }
-
-  if (/[,:;]/.test(subject) || trailingPrepositionMatcher.test(subject)) {
-    return false;
-  }
-
-  if (
-    blockedSubjects.has(normalized) ||
-    normalized.startsWith("prioridade ") ||
-    normalized.includes("neste caso") ||
-    normalized.includes("nestes casos") ||
-    normalized.includes("nesse caso") ||
-    normalized.includes("nesses casos")
-  ) {
-    return false;
-  }
-
-  if (looksLikeParagraphContinuation(subject) || hasConjugatedVerb(subject)) {
-    return false;
-  }
-
-  if (!hasSpecificWords(subject)) {
-    return false;
-  }
-
-  return !brokenPromptMatcher.test(`O que e ${normalized}`);
-}
-
-function isUsefulAnswer(value: string) {
-  const answer = cleanAnswer(value);
-  return (
-    answer.length >= 10 &&
-    answer.length <= 240 &&
-    !truncatedAnswerEndingMatcher.test(answer) &&
-    !looksLikeSystemNoise(answer)
-  );
-}
-
-function isDefinitionAnswerComplete(value: string) {
-  const answer = cleanAnswer(value);
-  const normalized = normalizeForComparison(answer);
-
-  if (answer.length < 30 || answer.length > 240 || countWords(answer) < 8) {
-    return false;
-  }
-
-  if (contextDependencyMatcher.test(normalized)) {
-    return false;
-  }
-
-  if (fragmentAnswerStartMatcher.test(normalized) && !directAnswerStartMatcher.test(normalized)) {
-    return false;
-  }
-
-  return hasSpecificWords(answer);
-}
-
-function finalizeDefinitionAnswer(value: string) {
-  const answer = cleanAnswer(value);
-  const normalized = normalizeForComparison(answer);
-
-  if (directAnswerStartMatcher.test(normalized)) {
-    return ensureSentence(answer);
-  }
-
-  if (fragmentAnswerStartMatcher.test(normalized)) {
-    return ensureSentence(`É ${answer.charAt(0).toLowerCase()}${answer.slice(1)}`);
-  }
-
-  return ensureSentence(answer);
-}
-
-function finalizePurposeAnswer(value: string) {
-  const answer = cleanAnswer(value);
-  const normalized = normalizeForComparison(answer);
-
-  if (/^(serve|permite|visa|ajuda)\b/i.test(normalized)) {
-    return ensureSentence(answer);
-  }
-
-  if (
-    startsWithLooseVerb(answer) ||
-    /^a possibilidade de\b/i.test(normalized) ||
-    /^que\b/i.test(normalized)
-  ) {
-    return ensureSentence(`Serve para ${answer.charAt(0).toLowerCase()}${answer.slice(1)}`);
-  }
-
-  return ensureSentence(answer);
-}
-
-function isPurposeAnswerComplete(value: string) {
-  const answer = cleanAnswer(value);
-  const normalized = normalizeForComparison(answer);
-
-  return (
-    answer.length >= 20 &&
-    answer.length <= 260 &&
-    countWords(answer) >= 6 &&
-    !contextDependencyMatcher.test(normalized) &&
-    !looksLikeSystemNoise(answer) &&
-    !truncatedAnswerEndingMatcher.test(answer) &&
-    /^(serve|permite|visa|ajuda)\b/i.test(normalized)
-  );
-}
-
-function isPreferredPurposeSubject(value: string) {
-  return preferredPurposeSubjectMatcher.test(value);
-}
-
-function scoreImportance(
-  category: UnitCategory,
-  subject: string,
-  answer: string,
-  sectionTitle: string,
-  frequencyMap: Map<string, number>,
-) {
+function buildImportance(kind: KnowledgeKind, topic: string, expectedAnswer: string, sectionTitle: string) {
   let score =
-    category === "formula"
+    kind === "definition"
       ? 9
-      : category === "procedure"
+      : kind === "purpose"
         ? 8
-        : category === "comparison"
+        : kind === "formula"
           ? 8
-          : category === "definition"
+          : kind === "comparison"
             ? 7
-            : category === "purpose"
+            : kind === "rule"
               ? 7
-              : category === "risk"
-                ? 7
-                : 5;
+              : kind === "procedure"
+                ? 6
+                : 6;
 
-  const normalizedSubject = normalizeForComparison(subject);
-  score += Math.min(3, frequencyMap.get(normalizedSubject) ?? 0);
+  const normalizedTopic = normalizeForComparison(topic);
+  const normalizedSection = normalizeForComparison(sectionTitle);
 
-  if (normalizeForComparison(sectionTitle).includes(normalizedSubject)) {
+  if (normalizedSection.includes(normalizedTopic)) {
     score += 2;
   }
 
-  if (/^[A-Z]{2,5}$/.test(subject)) {
-    score += 2;
-  }
-
-  if (/[=/%]/.test(answer)) {
-    score += 2;
-  }
-
-  if (importanceMatcher.test(answer) || impactMatcher.test(answer) || /serve para|calculo|formula/i.test(answer)) {
-    score += 2;
-  }
-
-  if (cleanTitle(sectionTitle) !== "Visao geral") {
+  if (expectedAnswer.includes("=") || /\bindice|calculo|formula\b/i.test(expectedAnswer)) {
     score += 1;
   }
 
-  if (contextDependencyMatcher.test(answer)) {
-    score -= 4;
-  }
-
+  score += Math.min(4, uniqueConceptTokens(expectedAnswer).length);
   return score;
 }
 
-function extractDefinitionPair(value: string) {
-  const sentence = cleanAnswer(value);
+function createKnowledgeUnit(
+  kind: KnowledgeKind,
+  topicInput: string,
+  expectedAnswerInput: string,
+  sourceTextInput: string,
+  section: TextSection,
+  referenceExcerptInput?: string,
+) {
+  const topic = trimOuterPunctuation(topicInput);
+  const expectedAnswer = ensureSentence(expectedAnswerInput);
+  const sourceText = ensureSentence(sourceTextInput);
+  const referenceExcerpt = ensureSentence(referenceExcerptInput ?? sourceTextInput);
 
-  const safeDirectMatch = sentence.match(
-    /^(.{3,80}?)\s+(?:é|e|eh|são|sao|significa|refere-se a|corresponde a|consiste em)\s+(.{12,220})$/i,
-  );
-  if (safeDirectMatch) {
-    return {
-      subject: safeDirectMatch[1],
-      answer: finalizeDefinitionAnswer(safeDirectMatch[2]),
-    };
+  if (
+    !isUsefulTopic(topic) ||
+    !isCompleteKnowledgeText(expectedAnswer) ||
+    !isCompleteKnowledgeText(sourceText, kind === "procedure" || kind === "list") ||
+    !isCompleteKnowledgeText(referenceExcerpt, kind === "procedure" || kind === "list")
+  ) {
+    return null;
   }
 
-  const directMatch = sentence.match(
-    /^(.{3,80}?)\s+(?:e|é|eh|sao|são|significa|refere-se a|corresponde a|consiste em)\s+(.{12,220})$/i,
-  );
-  if (directMatch) {
-    return {
-      subject: directMatch[1],
-      answer: finalizeDefinitionAnswer(directMatch[2]),
-    };
+  const keywords = extractReferenceKeywords(`${topic} ${expectedAnswer} ${referenceExcerpt}`, 6);
+  if (keywords.length < 2) {
+    return null;
   }
 
-  const defineAsMatch = sentence.match(/^(.{3,80}?)\s+define-se como\s+(.{12,220})$/i);
-  if (defineAsMatch) {
-    return {
-      subject: defineAsMatch[1],
-      answer: finalizeDefinitionAnswer(defineAsMatch[2]),
-    };
+  return {
+    id: `${kind}-${normalizeForComparison(topic)}-${normalizeForComparison(expectedAnswer).slice(0, 72)}`,
+    topic,
+    sourceText,
+    kind,
+    expectedAnswer,
+    referenceExcerpt,
+    keywords,
+    sectionTitle: section.title,
+    sectionIndex: section.index,
+    importance: buildImportance(kind, topic, expectedAnswer, section.title),
+  } satisfies KnowledgeUnit;
+}
+
+function buildStructuredUnit(subject: string, predicate: string, sourceText: string, section: TextSection) {
+  const normalizedPredicate = normalizeForComparison(predicate);
+
+  if (/^(e|eh|sao|significa|corresponde a|refere se a|consiste em)\b/i.test(normalizedPredicate)) {
+    return createKnowledgeUnit(
+      "definition",
+      subject,
+      `${trimOuterPunctuation(subject)} ${trimOuterPunctuation(predicate)}`,
+      sourceText,
+      section,
+    );
   }
 
-  const namedMatch = sentence.match(/^chamamos de\s+(.{3,60}?)\s+(.{12,220})$/i);
-  if (namedMatch) {
-    return {
-      subject: namedMatch[1],
-      answer: finalizeDefinitionAnswer(namedMatch[2]),
-    };
+  if (/^(serve para|permite|visa|ajuda a)\b/i.test(normalizedPredicate)) {
+    return createKnowledgeUnit(
+      "purpose",
+      subject,
+      `${trimOuterPunctuation(subject)} ${trimOuterPunctuation(predicate)}`,
+      sourceText,
+      section,
+    );
   }
 
-  const definedMatch = sentence.match(/^define-se\s+(.{3,60}?)\s+como\s+(.{12,220})$/i);
-  if (definedMatch) {
-    return {
-      subject: definedMatch[1],
-      answer: finalizeDefinitionAnswer(definedMatch[2]),
-    };
+  if (/=|\bformula|calculo|indice\b/i.test(predicate)) {
+    return createKnowledgeUnit(
+      "formula",
+      subject,
+      `${trimOuterPunctuation(subject)} ${trimOuterPunctuation(predicate)}`,
+      sourceText,
+      section,
+    );
+  }
+
+  if (/\bdeve|devem|nunca|sempre|obrigatorio\b/i.test(predicate)) {
+    return createKnowledgeUnit(
+      "rule",
+      subject,
+      `${trimOuterPunctuation(subject)} ${trimOuterPunctuation(predicate)}`,
+      sourceText,
+      section,
+    );
   }
 
   return null;
 }
 
-function createUnit(
-  category: UnitCategory,
-  subject: string,
-  answer: string,
-  statement: string,
-  section: TextSection,
-  frequencyMap: Map<string, number>,
-  listItems?: string[],
-) {
-  const cleanSub = cleanSubject(subject);
-  const cleanAns =
-    category === "definition"
-      ? finalizeDefinitionAnswer(answer)
-      : category === "purpose"
-        ? finalizePurposeAnswer(answer)
-        : cleanAnswer(answer);
-  const cleanStatement = ensureSentence(statement);
-
-  if (
-    !isUsefulSubject(cleanSub) ||
-    !isUsefulAnswer(cleanAns) ||
-    cleanStatement.length < 20 ||
-    looksLikeSystemNoise(cleanStatement) ||
-    (category !== "formula" && /^[A-Z]{2,5}$/.test(cleanSub))
-  ) {
-    return null;
-  }
-
-  if (category === "definition" && !isDefinitionAnswerComplete(cleanAns)) {
-    return null;
-  }
-
-  if (category === "purpose" && !isPurposeAnswerComplete(cleanAns)) {
-    return null;
-  }
-
-  if (["fact", "risk", "comparison"].includes(category) && !isStandaloneKnowledgeSentence(cleanStatement)) {
-    return null;
-  }
-
-  const topic = buildTopic(section.title, `${cleanSub} ${cleanAns}`);
-  const relatedTerms = extractKeywords(`${cleanSub} ${cleanAns} ${topic}`, 6);
-
-  return {
-    id: `${category}-${normalizeForComparison(cleanSub)}-${normalizeForComparison(cleanAns).slice(0, 48)}`,
-    category,
-    subject: cleanSub,
-    answer: cleanAns,
-    statement: cleanStatement,
-    topic,
-    sectionTitle: section.title,
-    sectionIndex: section.index,
-    importance: scoreImportance(category, cleanSub, cleanAns, section.title, frequencyMap),
-    relatedTerms,
-    listItems,
-    sourceExcerpt: cleanStatement,
-  } satisfies KnowledgeUnit;
-}
-
-function extractLeadSentence(section: TextSection) {
-  const sentences = splitIntoSentences(section);
-  return sentences[0]?.text ?? "";
-}
-
-function completeFragmentWithSection(fragment: string, section: TextSection) {
-  const cleanFragment = cleanAnswer(fragment);
-  if (!cleanFragment) {
-    return cleanFragment;
-  }
-
-  const sectionLead = cleanAnswer(extractLeadSentence(section) || section.lines.join(" "));
-  if (!sectionLead) {
-    return cleanFragment;
-  }
-
-  if (!truncatedAnswerEndingMatcher.test(cleanFragment) && sentenceEndingMatcher.test(cleanFragment)) {
-    return ensureSentence(cleanFragment);
-  }
-
-  if (normalizeForComparison(sectionLead).includes(normalizeForComparison(cleanFragment))) {
-    return ensureSentence(sectionLead);
-  }
-
-  const combined = cleanAnswer(`${cleanFragment} ${sectionLead}`);
-  const completeMatch = combined.match(/^(.{12,260}?(?:[.!?]|,\s))/u);
-  const shortened = completeMatch?.[1] ?? combined.slice(0, 260);
-
-  return ensureSentence(shortened);
-}
-
-function splitStructuredTitle(title: string) {
-  const clean = cleanTitle(title).replace(/\s+/g, " ").trim();
-  const parts = clean.split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean);
-  if (parts.length < 2) {
-    return null;
-  }
-
-  return {
-    subject: parts[0],
-    descriptor: parts.slice(1).join(" - "),
-  };
-}
-
-function shouldPreferSectionSubject(candidate: string, sectionTitle: string) {
-  const cleanCandidate = cleanSubject(candidate);
-  const sectionSubject = cleanSectionSubject(sectionTitle);
-
-  if (!sectionSubject || normalizeForComparison(cleanCandidate) === normalizeForComparison(sectionSubject)) {
-    return false;
-  }
-
-  const candidateTokens = extractComparableTokens(cleanCandidate);
-  const sectionTokens = extractComparableTokens(sectionSubject);
-  const overlap = candidateTokens.filter((token) => sectionTokens.includes(token)).length;
-
-  return (
-    cleanCandidate.split(/\s+/).length <= 3 &&
-    (genericOperationalSubjectMatcher.test(cleanCandidate) || overlap === 0)
-  );
-}
-
-function collectDefinitionUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    for (const sentence of splitIntoSentences(section)) {
-      if (purposeMatchers.some((matcher) => matcher.test(sentence.text))) {
-        continue;
-      }
-
-      const pair = extractDefinitionPair(sentence.text);
-      if (!pair) {
-        continue;
-      }
-
-      if (!isValidConceptCandidate(pair.subject) || !isDefinitionAnswerComplete(pair.answer)) {
-        continue;
-      }
-
-      const unit = createUnit("definition", pair.subject, pair.answer, sentence.text, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-      }
-    }
-  }
-
-  return units;
-}
-
-function collectPurposeUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    for (const sentence of splitIntoSentences(section)) {
-      const namedToolMatch = sentence.text.match(/^a ferramenta de\s+(.{3,80}?)\s+(?:permite|visa)\s+(.{12,220})$/i);
-      if (namedToolMatch && isValidConceptCandidate(namedToolMatch[1])) {
-        const unit = createUnit("purpose", namedToolMatch[1], namedToolMatch[2], sentence.text, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-          continue;
-        }
-      }
-
-      const titledToolMatch = sentence.text.match(/^(.{3,80}?)\s+-\s+a ferramenta\s+(?:visa|permite)\s+(.{12,220})$/i);
-      if (titledToolMatch && isValidConceptCandidate(titledToolMatch[1])) {
-        const unit = createUnit("purpose", titledToolMatch[1], titledToolMatch[2], sentence.text, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-          continue;
-        }
-      }
-
-      const describedToolMatch = sentence.text.match(
-        /^(.{3,60}?)\s+(?:e|é|eh)\s+uma?\s+(?:ferramenta|relatorio|sistema)[^.!?]*?\s+que\s+(permite|ajuda a|visa)\s+(.{12,220})$/i,
-      );
-      if (describedToolMatch && isValidConceptCandidate(describedToolMatch[1])) {
-        const unit = createUnit("purpose", describedToolMatch[1], describedToolMatch[3], sentence.text, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-          continue;
-        }
-      }
-
-      for (const matcher of purposeMatchers) {
-        const match = sentence.text.match(matcher);
-        if (!match) {
-          continue;
-        }
-
-        const subject = cleanSubject(match[1]);
-        if (
-          !isValidConceptCandidate(subject) ||
-          (/\bajuda a\b/i.test(sentence.text) && subject.split(/\s+/).length < 2 && !isPreferredPurposeSubject(subject))
-        ) {
-          continue;
-        }
-
-        const unit = createUnit("purpose", subject, match[2], sentence.text, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-        }
-
-        break;
-      }
-    }
-  }
-
-  return units;
-}
-
-function collectFormulaUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    for (const rawLine of section.lines) {
-      const line = rawLine.replace(/^[-*\u2022]\s+|^\d+[\.\)]\s+/u, "").trim();
-      if (line.length < 8) {
-        continue;
-      }
-
-      const acronymMatch = line.match(acronymMatcher);
-      if (acronymMatch) {
-        if (!isExplicitAcronymDefinition(line, acronymMatch[1], acronymMatch[2])) {
-          continue;
-        }
-
-        const unit = createUnit("formula", acronymMatch[1], acronymMatch[2], line, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-          continue;
-        }
-      }
-
-      const namedMatch = line.match(/(?:calculo|formula|equacao)\s+(?:da|do|de)\s+(.+?)(?::|$)/i);
-      const equalIndex = line.indexOf("=");
-      if (equalIndex > 0) {
-        const left = cleanSubject(line.slice(0, equalIndex));
-        const right = cleanAnswer(line.slice(equalIndex + 1));
-        const leftSubject = cleanSubject(left.split(":").pop() ?? left);
-        const subject =
-          cleanSubject(namedMatch?.[1] ?? "") ||
-          (genericFormulaSubjectMatcher.test(leftSubject) ? cleanTitle(section.title) : leftSubject) ||
-          cleanTitle(section.title);
-        const answer = line.includes("=") ? line : right;
-        const unit = createUnit("formula", subject, answer, line, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-        }
-
-        continue;
-      }
-
-      const calculatedMatch = line.match(/^(.{4,90}?)\s+pode ser calculad[oa]/i);
-      if (calculatedMatch || namedMatch) {
-        const subject = cleanSubject(calculatedMatch?.[1] ?? namedMatch?.[1] ?? cleanTitle(section.title));
-        const unit = createUnit("formula", subject, line, line, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-        }
-
-        continue;
-      }
-
-      const looksLikeStandaloneRatio =
-        line.includes("/") &&
-        countWords(line) <= 10 &&
-        !/[,:;]/.test(line) &&
-        !contextDependencyMatcher.test(line);
-      if (!looksLikeStandaloneRatio) {
-        continue;
-      }
-
-      const subject = cleanTitle(section.title);
-      if (!subject || genericFormulaSubjectMatcher.test(normalizeForComparison(subject))) {
-        continue;
-      }
-
-      const unit = createUnit("formula", subject, line, line, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-      }
-    }
-  }
-
-  return units;
-}
-
-function collectTitleBasedUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    const title = cleanTitle(section.title).replace(/\s+/g, " ").trim();
-    if (looksLikeSystemNoise(title) || normalizeForComparison(title) === "visao geral") {
-      continue;
-    }
-    if (!title || title === "Visão geral") {
-      continue;
-    }
-
-    const purposeMatch = title.match(/^(.+?)\s+-\s+serve para\s+(.+)$/i);
-    if (purposeMatch && !trailingPrepositionMatcher.test(purposeMatch[2]) && countWords(purposeMatch[2]) >= 4 && !/\b(o|a|os|as|um|uma|uns|umas)\s*$/i.test(purposeMatch[2])) {
-      const unit = createUnit(
-        "purpose",
-        purposeMatch[1],
-        finalizePurposeAnswer(purposeMatch[2]),
-        `${purposeMatch[1]} serve para ${purposeMatch[2]}.`,
-        section,
-        frequencyMap,
-      );
-      if (unit) {
-        units.push(unit);
-        continue;
-      }
-    }
-
-    const toolMatch = title.match(/^(.+?)\s+-\s+a ferramenta\s+(?:visa|permite)\s+(.+)$/i);
-    if (toolMatch && !trailingPrepositionMatcher.test(toolMatch[2]) && countWords(toolMatch[2]) >= 4) {
-      const unit = createUnit(
-        "purpose",
-        toolMatch[1],
-        finalizePurposeAnswer(toolMatch[2]),
-        `${toolMatch[1]} serve para ${toolMatch[2]}.`,
-        section,
-        frequencyMap,
-      );
-      if (unit) {
-        units.push(unit);
-        continue;
-      }
-    }
-
-    const definitionMatch = title.match(/^(.+?)\s+-\s+define-se como[, ]+\s*(.+)$/i);
-    if (definitionMatch && !trailingPrepositionMatcher.test(definitionMatch[2])) {
-      const unit = createUnit(
-        "definition",
-        definitionMatch[1],
-        definitionMatch[2],
-        `${definitionMatch[1]} é ${definitionMatch[2]}.`,
-        section,
-        frequencyMap,
-      );
-      if (unit) {
-        units.push(unit);
-      }
-    }
-  }
-
-  return units;
-}
-
-function collectStructuredTitleUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    const structuredTitle = splitStructuredTitle(section.title);
-    if (!structuredTitle) {
-      continue;
-    }
-
-    const subject = cleanSectionSubject(structuredTitle.subject);
-    const descriptor = structuredTitle.descriptor;
-
-    if (!subject || looksLikeSystemNoise(subject)) {
-      continue;
-    }
-
-    if (
-      /^serve para\s+/i.test(descriptor) ||
-      /^permite\s+/i.test(descriptor) ||
-      /^visa\s+/i.test(descriptor) ||
-      /^para anali/i.test(descriptor)
-    ) {
-      const rawAnswer = descriptor
-        .replace(/^serve para\s+/i, "")
-        .replace(/^para\s+/i, "")
-        .replace(/^(permite|visa)\s+/i, "");
-      const answer = finalizePurposeAnswer(completeFragmentWithSection(rawAnswer, section));
-      const unit = createUnit("purpose", subject, answer, `${subject} serve para ${answer}.`, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-        continue;
-      }
-    }
-
-    const toolMatch = descriptor.match(/^a ferramenta\s+(?:visa|permite)\s+(.+)$/i);
-    if (toolMatch) {
-      const answer = finalizePurposeAnswer(completeFragmentWithSection(toolMatch[1], section));
-      const unit = createUnit("purpose", subject, answer, `${subject} serve para ${answer}.`, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-        continue;
-      }
-    }
-
-    const definitionMatch = descriptor.match(/^define-se como[, ]+\s*(.+)$/i);
-    if (definitionMatch) {
-      const answer = completeFragmentWithSection(definitionMatch[1], section);
-      const unit = createUnit("definition", subject, answer, `${subject} Ã© ${answer}.`, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-        continue;
-      }
-    }
-
-    const reflectiveMatch = descriptor.match(
-      /^(o relatorio reflete|diariamente a loja recebe|esta etiqueta vem colada|opcao no coletor de dados que permite)\s+(.+)$/i,
-    );
-    if (reflectiveMatch) {
-      const answer = completeFragmentWithSection(`${reflectiveMatch[1]} ${reflectiveMatch[2]}`, section);
-      const unit = createUnit("fact", subject, answer, `${subject}: ${answer}.`, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-      }
-    }
-  }
-
-  return units;
-}
-
-function collectSectionLeadUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    const subject = cleanSectionSubject(section.title);
-    if (looksLikeSystemNoise(subject)) {
-      continue;
-    }
-    if (!subject || subject === "VisÃ£o geral" || splitStructuredTitle(section.title)) {
-      continue;
-    }
-
-    const leadSentence = extractLeadSentence(section);
-    if (!leadSentence || contextDependencyMatcher.test(leadSentence) || !isStandaloneKnowledgeSentence(leadSentence)) {
-      continue;
-    }
-
-    const unit = createUnit("fact", subject, leadSentence, leadSentence, section, frequencyMap);
-    if (unit) {
-      units.push(unit);
-    }
-  }
-
-  return units;
-}
-
-function extractListItems(section: TextSection) {
-  const explicitItems = section.lines
-    .filter((line) => /^[-*\u2022]\s+|^\d+[\.\)]\s+/u.test(line))
-    .map((line) => line.replace(/^[-*\u2022]\s+|^\d+[\.\)]\s+/u, "").trim())
-    .filter((line) => line.length >= 8);
-
-  if (explicitItems.length >= 2) {
-    return explicitItems;
-  }
-
-  if (!listTitleMatcher.test(section.title) || section.lines.length < 2) {
+function extractUnitsFromStructuredLine(line: string, section: TextSection) {
+  const cleaned = trimOuterPunctuation(line);
+  if (!cleaned || looksLikeSystemNoise(cleaned)) {
     return [];
   }
 
-  const compactLines = section.lines
-    .map((line) => line.trim())
-    .filter((line) => line.length >= 8 && line.length <= 140 && !/[.!?]$/.test(line));
+  const match = cleaned.match(/^(.{3,110}?)\s+-\s+(.{12,260})$/);
+  if (!match) {
+    return [];
+  }
 
-  return compactLines.length >= 2 ? compactLines : [];
+  const subject = trimOuterPunctuation(match[1]);
+  const predicate = trimOuterPunctuation(match[2]);
+  if (!isUsefulTopic(subject) || !isCompleteKnowledgeText(predicate)) {
+    return [];
+  }
+
+  const unit = buildStructuredUnit(subject, predicate, cleaned, section);
+  return unit ? [unit] : [];
 }
 
-function buildProcedurePrompt(title: string) {
-  const clean = cleanTitle(title).replace(/^procedimentos?\s+básicos?\s+(?:no|na|de)\s+/i, "");
-  const normalized = normalizeForComparison(clean);
-
-  if (normalized.includes("recebimento junto a fornecedores externos")) {
-    return "Quais cuidados devem ser observados no recebimento junto a fornecedores externos?";
-  }
-
-  if (normalized.includes("recebimento")) {
-    return "O que envolve a operação de recebimento?";
-  }
-
-  if (normalized.includes("armazenagem") || normalized.includes("armazenamento")) {
-    return "Quais cuidados devem ser observados na armazenagem?";
-  }
-
-  if (normalized.includes("planejamento")) {
-    return "Quais etapas fazem parte do planejamento de inventário?";
-  }
-
-  if (normalized.includes("inventario")) {
-    return "Por que os inventários são importantes?";
-  }
-
-  if (normalized.includes("perda")) {
-    return "Quais são causas comuns de perdas não identificadas?";
-  }
-
-  if (normalized.includes("gondola")) {
-    return "Como funciona a alocação de gôndola?";
-  }
-
-  if (normalized.includes("movimentacoes internas")) {
-    return "Por que as movimentações internas são importantes?";
-  }
-
-  return `Quais cuidados devem ser observados em ${clean.toLowerCase()}?`;
-}
-
-function collectProcedureUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    const items = extractListItems(section);
-    if (items.length < 2) {
+function extractDefinitionUnit(sentence: string, section: TextSection) {
+  for (const matcher of definitionMatchers) {
+    const match = sentence.match(matcher);
+    if (!match) {
       continue;
     }
 
-    const subject = cleanTitle(section.title);
-    const answer = items.join("; ");
-    const statement = `${buildProcedurePrompt(section.title)} ${answer}`;
-    const unit = createUnit("procedure", subject, answer, statement, section, frequencyMap, items);
-
-    if (unit) {
-      units.push(unit);
-    }
+    const subject = trimOuterPunctuation(match[1]);
+    const answer = trimOuterPunctuation(match[2]);
+    return createKnowledgeUnit("definition", subject, sentence, sentence, section, sentence) ??
+      createKnowledgeUnit("definition", subject, `${subject} \u00e9 ${answer}`, sentence, section, sentence);
   }
 
-  return units;
+  return null;
 }
 
-function collectComparisonUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    for (const sentence of splitIntoSentences(section)) {
-      const betweenMatch = sentence.text.match(
-        /diferenca entre\s+(.+?)\s+e\s+(.+?)(?:\s+(?:esta|estao|fica|ficam|reside|mostra|indica|revela|explica|evidencia)|[.!?]|$)/i,
-      );
-      if (betweenMatch) {
-        const subject = `${cleanSubject(betweenMatch[1])} e ${cleanSubject(betweenMatch[2])}`;
-        const unit = createUnit("comparison", subject, sentence.text, sentence.text, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-        }
-
-        continue;
-      }
-
-      const differsMatch = sentence.text.match(
-        /(.{4,90}?)\s+(?:difere|se diferencia)\s+de\s+(.{4,90}?)(?:\s+(?:porque|pois|quando)|[.!?]|$)/i,
-      );
-      if (differsMatch) {
-        const subject = `${cleanSubject(differsMatch[1])} e ${cleanSubject(differsMatch[2])}`;
-        const unit = createUnit("comparison", subject, sentence.text, sentence.text, section, frequencyMap);
-        if (unit) {
-          units.push(unit);
-        }
-
-        continue;
-      }
-
-      if (!comparisonMatcher.test(sentence.text) && !/\benquanto\b/i.test(sentence.text)) {
-        continue;
-      }
-
-      if (!/\b(comparacao|comparado com|em comparacao com|enquanto)\b/i.test(sentence.text)) {
-        continue;
-      }
-
-      const title = cleanTitle(section.title);
-      const subject = title !== "Visao geral" ? title : buildTopic(section.title, sentence.text);
-      const unit = createUnit("comparison", subject, sentence.text, sentence.text, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-      }
+function extractPurposeUnit(sentence: string, section: TextSection) {
+  for (const matcher of purposeMatchers) {
+    const match = sentence.match(matcher);
+    if (!match) {
+      continue;
     }
+
+    const subject = trimOuterPunctuation(match[1]);
+    return createKnowledgeUnit("purpose", subject, sentence, sentence, section, sentence);
   }
 
-  return units;
+  return null;
 }
 
-function collectRiskUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    for (const sentence of splitIntoSentences(section)) {
-      if (!riskMatcher.test(sentence.text)) {
-        continue;
-      }
-
-      if (
-        comparisonMatcher.test(sentence.text) ||
-        Boolean(extractDefinitionPair(sentence.text)) ||
-        purposeMatchers.some((matcher) => matcher.test(sentence.text))
-      ) {
-        continue;
-      }
-
-      const riskMatch = sentence.text.match(/risco de\s+(.+?)(?:,|\.|;|$)/i);
-      const impactMatch = sentence.text.match(/impacto de\s+(.+?)(?:,|\.|;|$)/i);
-      const causeMatch = sentence.text.match(/^(.{4,90}?)\s+(gera|afeta|provoca|reduz|aumenta|leva|resulta)\b/i);
-      const candidateSubject = cleanSubject(
-        causeMatch?.[1] ??
-          riskMatch?.[1] ??
-          impactMatch?.[1] ??
-          cleanTitle(section.title) ??
-          buildTopic(section.title, sentence.text),
-      );
-      const subject = shouldPreferSectionSubject(candidateSubject, section.title)
-        ? cleanSectionSubject(section.title)
-        : candidateSubject;
-
-      const unit = createUnit("risk", subject, sentence.text, sentence.text, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-      }
+function extractComparisonUnit(sentence: string, section: TextSection) {
+  for (const matcher of comparisonMatchers) {
+    const match = sentence.match(matcher);
+    if (!match) {
+      continue;
     }
+
+    const topic = titleCase(`${trimOuterPunctuation(match[1])} e ${trimOuterPunctuation(match[2])}`);
+    return createKnowledgeUnit("comparison", topic, sentence, sentence, section, sentence);
   }
 
-  return units;
+  if (/\bdiferen(?:ca|\u00e7a) entre\b/i.test(sentence)) {
+    const topic = buildTopicFallback(section, sentence);
+    return createKnowledgeUnit("comparison", topic, sentence, sentence, section, sentence);
+  }
+
+  return null;
 }
 
-function extractFactSubject(sentence: string, sectionTitle: string) {
-  const importanceMatch = sentence.match(/^(.{4,80}?)\s+(?:configura-se|e|é|eh|sao|são|representa|tem)\b/i);
-  if (importanceMatch && isValidConceptCandidate(importanceMatch[1])) {
-    return cleanSubject(importanceMatch[1]);
+function extractFormulaUnit(sentence: string, section: TextSection) {
+  if (!/=|\bformula|calculo|indice|percentual\b/i.test(sentence)) {
+    return null;
   }
 
-  const impactOfMatch = sentence.match(/impacto de\s+(.+?)(?:,|\.|;|$)/i);
-  if (impactOfMatch && isValidConceptCandidate(impactOfMatch[1])) {
-    return cleanSubject(impactOfMatch[1]);
-  }
-
-  const title = cleanSectionSubject(sectionTitle);
-  return title !== "Visao geral" ? title : "";
+  const topic = buildTopicFallback(section, sentence);
+  return createKnowledgeUnit("formula", topic, sentence, sentence, section, sentence);
 }
 
-function collectFactUnits(sections: TextSection[], frequencyMap: Map<string, number>) {
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    const sentences = splitIntoSentences(section).filter(
-      (sentence) =>
-        !listTitleMatcher.test(sentence.text) &&
-        !contextDependencyMatcher.test(sentence.text) &&
-        (importanceMatcher.test(sentence.text) || concreteImpactMatcher.test(sentence.text)),
-    );
-
-    for (const sentence of sentences) {
-      const subject = extractFactSubject(sentence.text, section.title);
-      if (!subject || !isValidConceptCandidate(subject)) {
-        continue;
-      }
-
-      const unit = createUnit("fact", subject, sentence.text, sentence.text, section, frequencyMap);
-      if (unit) {
-        units.push(unit);
-      }
-    }
+function extractRuleUnit(sentence: string, section: TextSection) {
+  if (!/\bdeve|devem|nunca|sempre|obrigatorio\b/i.test(sentence)) {
+    return null;
   }
 
-  return units;
+  const topic = buildTopicFallback(section, sentence);
+  return createKnowledgeUnit("rule", topic, sentence, sentence, section, sentence);
+}
+
+function extractUnitsFromSentence(sentence: string, section: TextSection) {
+  const cleaned = ensureSentence(sentence);
+  if (!isCompleteKnowledgeText(cleaned)) {
+    return [];
+  }
+
+  const definitionUnit = extractDefinitionUnit(cleaned, section);
+  if (definitionUnit) {
+    return [definitionUnit];
+  }
+
+  const purposeUnit = extractPurposeUnit(cleaned, section);
+  if (purposeUnit) {
+    return [purposeUnit];
+  }
+
+  const comparisonUnit = extractComparisonUnit(cleaned, section);
+  if (comparisonUnit) {
+    return [comparisonUnit];
+  }
+
+  return [extractFormulaUnit(cleaned, section), extractRuleUnit(cleaned, section)].filter(
+    (unit): unit is KnowledgeUnit => Boolean(unit),
+  );
+}
+
+function extractProcedureOrListUnit(section: TextSection) {
+  const cleanedTitle = cleanSectionTitle(section.title);
+  if (!isUsefulTopic(cleanedTitle)) {
+    return null;
+  }
+
+  const validLines = section.lines
+    .map((line) => trimOuterPunctuation(line))
+    .filter((line) => line.length >= 8)
+    .filter((line) => !looksLikeSystemNoise(line) && !hasBrokenExtractionSymbols(line));
+
+  if (validLines.length < 2 || validLines.length > 6) {
+    return null;
+  }
+
+  const kind: KnowledgeKind = listLikeTitleMatcher.test(cleanedTitle)
+    ? "list"
+    : procedureLikeTitleMatcher.test(cleanedTitle)
+      ? "procedure"
+      : "list";
+
+  const expectedAnswer =
+    kind === "procedure"
+      ? `Os passos principais de ${cleanedTitle.toLowerCase()} sao: ${validLines.join("; ")}.`
+      : `Os pontos principais de ${cleanedTitle.toLowerCase()} sao: ${validLines.join("; ")}.`;
+
+  return createKnowledgeUnit(kind, cleanedTitle, expectedAnswer, expectedAnswer, section, validLines.join("; "));
 }
 
 function dedupeUnits(units: KnowledgeUnit[]) {
@@ -1345,7 +808,7 @@ function dedupeUnits(units: KnowledgeUnit[]) {
   const deduped: KnowledgeUnit[] = [];
 
   for (const unit of units) {
-    const key = `${unit.category}|${normalizeForComparison(unit.subject)}|${normalizeForComparison(unit.answer)}`;
+    const key = `${unit.kind}|${normalizeForComparison(unit.topic)}|${normalizeForComparison(unit.expectedAnswer)}`;
     if (seen.has(key)) {
       continue;
     }
@@ -1354,1306 +817,53 @@ function dedupeUnits(units: KnowledgeUnit[]) {
     deduped.push(unit);
   }
 
-  return deduped.sort((left, right) => right.importance - left.importance);
+  return deduped.sort((left, right) => {
+    if (right.importance === left.importance) {
+      return left.sectionIndex - right.sectionIndex;
+    }
+
+    return right.importance - left.importance;
+  });
 }
 
 function analyzeDocument(document: Document): DocumentAnalysis {
-  const sections = extractSections(document.cleanedText);
-  const frequencyMap = buildFrequencyMap(document.cleanedText);
+  const structuredQuestions = parseStructuredQuestionnaire(document.cleanedText);
+  if (structuredQuestions.length >= 5) {
+    return {
+      sections: extractSections(document.cleanedText),
+      units: [],
+      structuredQuestions,
+      emphasis: [...new Set(structuredQuestions.map((question) => question.topic))].slice(0, 3),
+    };
+  }
 
-  const units = dedupeUnits([
-    ...collectDefinitionUnits(sections, frequencyMap),
-    ...collectPurposeUnits(sections, frequencyMap),
-    ...collectFormulaUnits(sections, frequencyMap),
-    ...collectTitleBasedUnits(sections, frequencyMap),
-    ...collectStructuredTitleUnits(sections, frequencyMap),
-    ...collectSectionLeadUnits(sections, frequencyMap),
-    ...collectProcedureUnits(sections, frequencyMap),
-    ...collectComparisonUnits(sections, frequencyMap),
-    ...collectRiskUnits(sections, frequencyMap),
-    ...collectFactUnits(sections, frequencyMap),
-  ]);
+  const sections = extractSections(document.cleanedText);
+  const units: KnowledgeUnit[] = [];
+
+  for (const section of sections) {
+    const listUnit = extractProcedureOrListUnit(section);
+    if (listUnit) {
+      units.push(listUnit);
+    }
+
+    for (const line of section.lines) {
+      units.push(...extractUnitsFromStructuredLine(line, section));
+    }
+
+    for (const sentence of splitIntoSentences(section.content)) {
+      units.push(...extractUnitsFromSentence(sentence, section));
+    }
+  }
 
   return {
     sections,
-    units,
-    emphasis: extractKeywords(document.cleanedText, 3),
+    units: dedupeUnits(units),
+    structuredQuestions: [],
+    emphasis: extractReferenceKeywords(document.cleanedText, 3).map((keyword) => titleCase(keyword)),
   };
 }
 
-function buildSectionAwarePrompt(unit: KnowledgeUnit) {
-  const subject = unit.subject.toLowerCase();
-  const normalized = normalizeForComparison(unit.subject);
-
-  if (normalized.includes("recebimento junto a fornecedores externos")) {
-    return "Quais cuidados devem ser observados no recebimento junto a fornecedores externos?";
-  }
-
-  if (normalized.includes("recebimento")) {
-    return "O que envolve a operação de recebimento?";
-  }
-
-  if (normalized.includes("armazenagem") || normalized.includes("armazenamento")) {
-    return "Quais cuidados devem ser observados na armazenagem?";
-  }
-
-  if (normalized.includes("inventario")) {
-    return "Por que os inventários são importantes?";
-  }
-
-  if (normalized.includes("perdas identificadas e nao identificadas")) {
-    return "Qual é a diferença entre perdas identificadas e não identificadas?";
-  }
-
-  if (normalized.includes("relatorio de produtos com estoque sem vendas")) {
-    return "Para que serve o relatório de produtos com estoque sem vendas?";
-  }
-
-  if (normalized.includes("pedido extra")) {
-    return "Para que serve o pedido extra?";
-  }
-
-  if (importanceMatcher.test(unit.statement)) {
-    return `Por que ${subject} é importante?`;
-  }
-
-  if (impactMatcher.test(unit.statement)) {
-    return `Qual é o impacto de ${subject}?`;
-  }
-
-  return null;
-}
-
-function buildConcretePrompt(unit: KnowledgeUnit) {
-  const subject = unit.subject.toLowerCase();
-  const normalized = normalizeForComparison(unit.subject);
-  const sectionContext = normalizeForComparison(cleanTitle(unit.sectionTitle));
-  const context = `${sectionContext} ${normalized}`.trim();
-  const normalizedStatement = normalizeForComparison(unit.statement);
-
-  if (context.includes("sugestao de pedido automatico")) {
-    return "Como funciona a sugestão de pedido automático?";
-  }
-
-  if (context.includes("saida media")) {
-    return "O que é saída média?";
-  }
-
-  if (context.includes("cobertura de estoque")) {
-    if (unit.category === "definition" || /\bindice utilizado\b/i.test(normalizeForComparison(unit.answer))) {
-      return "O que é cobertura de estoque?";
-    }
-
-    if (concreteImpactMatcher.test(normalizedStatement)) {
-      return "Quais riscos surgem quando a cobertura de estoque fica desequilibrada?";
-    }
-
-    return "Por que a cobertura de estoque merece atenção?";
-  }
-
-  if (context.includes("alocacao de gondola")) {
-    return "Como funciona a alocação de gôndola?";
-  }
-
-  if (context.includes("estoque padrao")) {
-    return "O que é estoque padrão?";
-  }
-
-  if (context.includes("faixas de reposicao de estoque")) {
-    return "Como funcionam as faixas de reposição de estoque?";
-  }
-
-  if (context.includes("dias de estoque")) {
-    return "O que são dias de estoque?";
-  }
-
-  if (normalized.includes("inventario")) {
-    if (unit.category === "definition") {
-      return "O que é inventário?";
-    }
-
-    return "Por que os inventários são importantes?";
-  }
-
-  if (context.includes("calculo das perdas")) {
-    return "Como é calculada a perda bruta?";
-  }
-
-  if (normalized.includes("perdas identificadas e nao identificadas")) {
-    return "Qual é a diferença entre perdas identificadas e não identificadas?";
-  }
-
-  if (normalized.includes("perda")) {
-    if (unit.category === "definition") {
-      return "O que é perda?";
-    }
-
-    if (concreteImpactMatcher.test(normalizedStatement)) {
-      return "Quais são causas comuns de perdas não identificadas?";
-    }
-  }
-
-  if (context.includes("relatorio de acompanhamento falta x excesso")) {
-    return "O que o relatório de acompanhamento falta x excesso ajuda a identificar?";
-  }
-
-  if (context.includes("relatorio de produtos nao atendidos")) {
-    return "O que o relatório de produtos não atendidos ajuda a verificar?";
-  }
-
-  if (context.includes("relatorio de produtos com estoque sem vendas")) {
-    return "Para que serve o relatório de produtos com estoque sem vendas?";
-  }
-
-  if (context.includes("gestao de estoque cobertura")) {
-    return "O que a gestão de estoque por cobertura permite analisar?";
-  }
-
-  if (context.includes("posicao de estoque")) {
-    return "O que o relatório de posição de estoque mostra?";
-  }
-
-  if (context.includes("curva abc")) {
-    return "Para que serve a curva ABC?";
-  }
-
-  if (context.includes("alerta estoque sem vendas")) {
-    return "O que o alerta de estoque sem vendas por e-mail informa?";
-  }
-
-  if (context.includes("etiqueta de separacao")) {
-    return "O que a etiqueta de separação indica no recebimento?";
-  }
-
-  if (context.includes("acompanhamento de perdas")) {
-    return "O que o acompanhamento de perdas permite analisar?";
-  }
-
-  if (normalized.includes("pedido extra")) {
-    return "Para que serve o pedido extra?";
-  }
-
-  if (importanceMatcher.test(unit.statement)) {
-    return `Por que ${subject} é importante?`;
-  }
-
-  if (concreteImpactMatcher.test(normalizedStatement)) {
-    return `Qual é o impacto de ${subject}?`;
-  }
-
-  return buildSectionAwarePrompt(unit);
-}
-
-function buildQuestionPrompt(unit: KnowledgeUnit) {
-  if (unit.category === "definition") {
-    return `O que é ${unit.subject}?`;
-  }
-
-  if (unit.category === "purpose") {
-    return buildConcretePrompt(unit) ?? `Para que serve ${unit.subject}?`;
-  }
-
-  if (unit.category === "formula") {
-    return /^[A-Z]{2,5}$/.test(unit.subject)
-      ? `O que significa ${unit.subject}?`
-      : `Como é calculado ${unit.subject}?`;
-  }
-
-  if (unit.category === "comparison") {
-    return normalizeForComparison(unit.subject).includes(" e ")
-      ? `Qual é a diferença entre ${unit.subject}?`
-      : `Como este ponto pode ser comparado em ${unit.subject.toLowerCase()}?`;
-  }
-
-  if (unit.category === "procedure") {
-    return buildProcedurePrompt(unit.subject);
-  }
-
-  if (unit.category === "risk") {
-    return buildSectionAwarePrompt(unit) ?? `Qual é o risco ou impacto ligado a ${unit.subject}?`;
-  }
-
-  return buildSectionAwarePrompt(unit) ?? `O que o material destaca sobre ${unit.subject.toLowerCase()}?`;
-}
-
-function buildQuestionPromptV2(unit: KnowledgeUnit) {
-  if (unit.category === "definition") {
-    return `O que Ã© ${unit.subject}?`;
-  }
-
-  if (unit.category === "purpose") {
-    return buildConcretePrompt(unit) ?? `Para que serve ${unit.subject}?`;
-  }
-
-  if (unit.category === "formula") {
-    return /^[A-Z]{2,5}$/.test(unit.subject)
-      ? `O que significa ${unit.subject}?`
-      : `Como Ã© calculado ${unit.subject}?`;
-  }
-
-  if (unit.category === "comparison") {
-    return normalizeForComparison(unit.subject).includes(" e ")
-      ? `Qual Ã© a diferenÃ§a entre ${unit.subject}?`
-      : `Como este ponto pode ser comparado em ${unit.subject.toLowerCase()}?`;
-  }
-
-  if (unit.category === "procedure") {
-    return buildProcedurePrompt(unit.subject);
-  }
-
-  if (unit.category === "risk") {
-    return buildConcretePrompt(unit) ?? `Quais riscos ou impactos estÃ£o ligados a ${unit.subject}?`;
-  }
-
-  return buildConcretePrompt(unit) ?? `O que o material explica sobre ${unit.subject.toLowerCase()}?`;
-}
-
-function buildReinforcementPrompt(unit: KnowledgeUnit) {
-  const normalized = normalizeForComparison(unit.subject);
-  const sectionContext = normalizeForComparison(cleanTitle(unit.sectionTitle));
-  const context = `${sectionContext} ${normalized}`.trim();
-
-  if (context.includes("relatorio")) {
-    return `Que tipo de situaÃ§Ã£o ${unit.subject} ajuda a acompanhar?`;
-  }
-
-  if (normalized.includes("inventario")) {
-    return "O que precisa ser confrontado em um inventÃ¡rio?";
-  }
-
-  if (normalized === "ruptura" || normalized.includes("ruptura")) {
-    return "Em que momento acontece a ruptura?";
-  }
-
-  if (normalized === "perda") {
-    return "Que tipo de ocorrÃªncia o material classifica como perda?";
-  }
-
-  if (normalized.includes("perdas identificadas")) {
-    return "Como o material caracteriza as perdas identificadas?";
-  }
-
-  if (context.includes("sugestao de pedido automatico")) {
-    return "Quem gera a sugestÃ£o de pedido automÃ¡tico?";
-  }
-
-  if (normalized.includes("pedido extra")) {
-    return "Quando faz sentido recorrer ao pedido extra?";
-  }
-
-  if (context.includes("alocacao de gondola")) {
-    return "O que a alocaÃ§Ã£o de gÃ´ndola define na prÃ¡tica?";
-  }
-
-  if (context.includes("cobertura de estoque")) {
-    return "O que a cobertura de estoque ajuda a medir?";
-  }
-
-  if (context.includes("saida media")) {
-    return "O que a saÃ­da mÃ©dia mostra sobre o produto?";
-  }
-
-  if (context.includes("recebimento")) {
-    return "Que cuidado o material destaca no recebimento?";
-  }
-
-  return null;
-}
-
-function buildRetentionPrompt(unit: KnowledgeUnit) {
-  const normalized = normalizeForComparison(unit.subject);
-  const sectionContext = normalizeForComparison(cleanTitle(unit.sectionTitle));
-  const context = `${sectionContext} ${normalized}`.trim();
-
-  if (context.includes("relatorio")) {
-    return `Quando vale consultar ${unit.subject}?`;
-  }
-
-  if (normalized.includes("inventario")) {
-    return "O que o inventário compara na prática?";
-  }
-
-  if (normalized === "perda") {
-    return "O que transforma uma compra em perda?";
-  }
-
-  if (normalized.includes("ruptura")) {
-    return "Por que a ruptura prejudica as vendas?";
-  }
-
-  if (normalized.includes("pedido extra")) {
-    return "Qual é o papel do pedido extra no abastecimento?";
-  }
-
-  if (context.includes("alocacao de gondola")) {
-    return "Qual quantidade a alocação de gôndola estabelece?";
-  }
-
-  if (context.includes("sugestao de pedido automatico")) {
-    return "Em que momento a sugestão de pedido automático é gerada?";
-  }
-
-  if (context.includes("cobertura de estoque")) {
-    return "Que decisão a cobertura de estoque ajuda a orientar?";
-  }
-
-  if (unit.category === "purpose") {
-    return `Em que situaÃ§Ã£o ${unit.subject} Ã© Ãºtil?`;
-  }
-
-  if (unit.category === "definition") {
-    return `Como reconhecer ${unit.subject} na prÃ¡tica?`;
-  }
-
-  if (unit.category === "fact") {
-    return `O que vale lembrar sobre ${unit.subject}?`;
-  }
-
-  if (unit.category === "risk") {
-    return `Que problema ${unit.subject} ajuda a evitar?`;
-  }
-
-  return null;
-}
-
-function buildPracticalPrompt(unit: KnowledgeUnit) {
-  const normalized = normalizeForComparison(unit.subject);
-  const sectionContext = normalizeForComparison(cleanTitle(unit.sectionTitle));
-  const context = `${sectionContext} ${normalized}`.trim();
-
-  if (context.includes("relatorio")) {
-    return `Que decisÃ£o ${unit.subject} ajuda a tomar?`;
-  }
-
-  if (normalized.includes("inventario")) {
-    return "Como o inventÃ¡rio ajuda a conferir o estoque?";
-  }
-
-  if (normalized.includes("pedido extra")) {
-    return "Como o pedido extra ajuda a ajustar o abastecimento?";
-  }
-
-  if (context.includes("alocacao de gondola")) {
-    return "Como a alocaÃ§Ã£o de gÃ´ndola ajuda a organizar o estoque da loja?";
-  }
-
-  if (context.includes("cobertura de estoque")) {
-    return "Como a cobertura de estoque apoia a decisÃ£o de compra?";
-  }
-
-  return null;
-}
-
-function buildFeynmanPrompt(unit: KnowledgeUnit) {
-  if (unit.category === "comparison") {
-    return `Explique com suas palavras a diferença entre ${unit.subject}.`;
-  }
-
-  if (unit.category === "formula") {
-    return /^[A-Z]{2,5}$/.test(unit.subject)
-      ? `Explique com suas palavras o que significa ${unit.subject}.`
-      : `Explique com suas palavras como funciona o cálculo de ${unit.subject}.`;
-  }
-
-  if (unit.category === "procedure") {
-    return `Explique com suas palavras como funciona ${unit.subject.toLowerCase()}.`;
-  }
-
-  if (unit.category === "risk") {
-    return `Explique com suas palavras por que ${unit.subject.toLowerCase()} pode trazer problemas.`;
-  }
-
-  return `Explique com suas palavras ${unit.subject.toLowerCase()}.`;
-}
-
-function buildPrimaryPromptSafe(unit: KnowledgeUnit) {
-  const subject = unit.subject.toLowerCase();
-  const normalized = normalizeForComparison(unit.subject);
-  const sectionContext = normalizeForComparison(cleanTitle(unit.sectionTitle));
-  const context = `${sectionContext} ${normalized}`.trim();
-  const normalizedStatement = normalizeForComparison(unit.statement);
-
-  if (unit.category === "definition") {
-    if (normalized.includes("inventario")) {
-      return "O que é inventário?";
-    }
-
-    if (context.includes("saida media")) {
-      return "O que é saída média?";
-    }
-
-    if (context.includes("cobertura de estoque")) {
-      return "O que é cobertura de estoque?";
-    }
-
-    return `O que é ${unit.subject}?`;
-  }
-
-  if (unit.category === "purpose") {
-    if (context.includes("relatorio de produtos nao atendidos")) {
-      return "Para que serve o relatório de produtos não atendidos?";
-    }
-
-    if (context.includes("produtos com estoque sem vendas")) {
-      return "Para que serve o relatório de produtos com estoque sem vendas?";
-    }
-
-    if (context.includes("pedido extra")) {
-      return "Para que serve o pedido extra?";
-    }
-
-    return `Para que serve ${unit.subject}?`;
-  }
-
-  if (unit.category === "formula") {
-    return /^[A-Z]{2,5}$/.test(unit.subject)
-      ? `O que significa ${unit.subject}?`
-      : `Como é calculado ${unit.subject}?`;
-  }
-
-  if (unit.category === "comparison") {
-    return normalizeForComparison(unit.subject).includes(" e ")
-      ? `Qual é a diferença entre ${unit.subject}?`
-      : `Como este ponto pode ser comparado em ${unit.subject.toLowerCase()}?`;
-  }
-
-  if (unit.category === "procedure") {
-    return buildProcedurePrompt(unit.subject);
-  }
-
-  if (unit.category === "risk") {
-    if (context.includes("cobertura de estoque")) {
-      return "Quais riscos surgem quando a cobertura de estoque fica desequilibrada?";
-    }
-
-    return `Quais riscos ou impactos estão ligados a ${unit.subject}?`;
-  }
-
-  if (context.includes("relatorio de acompanhamento falta x excesso")) {
-    return "O que o relatório de acompanhamento falta x excesso ajuda a identificar?";
-  }
-
-  if (context.includes("gestao de estoque cobertura")) {
-    return "O que a gestão de estoque por cobertura permite analisar?";
-  }
-
-  if (importanceMatcher.test(unit.statement)) {
-    return `Por que ${subject} é importante?`;
-  }
-
-  if (concreteImpactMatcher.test(normalizedStatement)) {
-    return `Qual é o impacto de ${subject}?`;
-  }
-
-  return `O que o material explica sobre ${unit.subject.toLowerCase()}?`;
-}
-
-function buildReinforcementPromptSafe(unit: KnowledgeUnit) {
-  const normalized = normalizeForComparison(unit.subject);
-  const sectionContext = normalizeForComparison(cleanTitle(unit.sectionTitle));
-  const context = `${sectionContext} ${normalized}`.trim();
-
-  if (context.includes("relatorio")) {
-    return `Que tipo de situação ${unit.subject} ajuda a acompanhar?`;
-  }
-
-  if (normalized.includes("inventario")) {
-    return "O que precisa ser confrontado em um inventário?";
-  }
-
-  if (normalized === "ruptura" || normalized.includes("ruptura")) {
-    return "Em que momento acontece a ruptura?";
-  }
-
-  if (normalized === "perda") {
-    return "Que tipo de ocorrência o material classifica como perda?";
-  }
-
-  if (normalized.includes("perdas identificadas")) {
-    return "Como o material caracteriza as perdas identificadas?";
-  }
-
-  if (context.includes("sugestao de pedido automatico")) {
-    return "Quem gera a sugestão de pedido automático?";
-  }
-
-  if (normalized.includes("pedido extra")) {
-    return "Quando faz sentido recorrer ao pedido extra?";
-  }
-
-  if (context.includes("alocacao de gondola")) {
-    return "O que a alocação de gôndola define na prática?";
-  }
-
-  if (context.includes("cobertura de estoque")) {
-    return "O que a cobertura de estoque ajuda a medir?";
-  }
-
-  if (context.includes("saida media")) {
-    return "O que a saída média mostra sobre o produto?";
-  }
-
-  if (context.includes("recebimento")) {
-    return "Que cuidado o material destaca no recebimento?";
-  }
-
-  return null;
-}
-
-function buildRetentionPromptSafe(unit: KnowledgeUnit) {
-  const normalized = normalizeForComparison(unit.subject);
-  const sectionContext = normalizeForComparison(cleanTitle(unit.sectionTitle));
-  const context = `${sectionContext} ${normalized}`.trim();
-
-  if (context.includes("relatorio")) {
-    return `Quando vale consultar ${unit.subject}?`;
-  }
-
-  if (normalized.includes("inventario")) {
-    return "O que o inventário compara na prática?";
-  }
-
-  if (normalized === "perda") {
-    return "O que transforma uma compra em perda?";
-  }
-
-  if (normalized.includes("ruptura")) {
-    return "Por que a ruptura prejudica as vendas?";
-  }
-
-  if (normalized.includes("pedido extra")) {
-    return "Qual é o papel do pedido extra no abastecimento?";
-  }
-
-  if (context.includes("alocacao de gondola")) {
-    return "Qual quantidade a alocação de gôndola estabelece?";
-  }
-
-  if (context.includes("sugestao de pedido automatico")) {
-    return "Em que momento a sugestão de pedido automático é gerada?";
-  }
-
-  if (context.includes("cobertura de estoque")) {
-    return "Que decisão a cobertura de estoque ajuda a orientar?";
-  }
-
-  if (unit.category === "purpose") {
-    return `Em que situação ${unit.subject} é útil?`;
-  }
-
-  if (unit.category === "definition") {
-    return `Como reconhecer ${unit.subject} na prática?`;
-  }
-
-  if (unit.category === "fact") {
-    return `O que vale lembrar sobre ${unit.subject}?`;
-  }
-
-  if (unit.category === "risk") {
-    return `Que problema ${unit.subject} ajuda a evitar?`;
-  }
-
-  return null;
-}
-
-function buildPracticalPromptSafe(unit: KnowledgeUnit) {
-  const normalized = normalizeForComparison(unit.subject);
-  const sectionContext = normalizeForComparison(cleanTitle(unit.sectionTitle));
-  const context = `${sectionContext} ${normalized}`.trim();
-
-  if (context.includes("relatorio")) {
-    return `Que decisão ${unit.subject} ajuda a tomar?`;
-  }
-
-  if (normalized.includes("inventario")) {
-    return "Como o inventário ajuda a conferir o estoque?";
-  }
-
-  if (normalized.includes("pedido extra")) {
-    return "Como o pedido extra ajuda a ajustar o abastecimento?";
-  }
-
-  if (context.includes("alocacao de gondola")) {
-    return "Como a alocação de gôndola ajuda a organizar o estoque da loja?";
-  }
-
-  if (context.includes("cobertura de estoque")) {
-    return "Como a cobertura de estoque apoia a decisão de compra?";
-  }
-
-  return null;
-}
-
-function buildFeynmanPromptSafe(unit: KnowledgeUnit) {
-  if (unit.category === "comparison") {
-    return `Explique com suas palavras a diferença entre ${unit.subject}.`;
-  }
-
-  if (unit.category === "formula") {
-    return /^[A-Z]{2,5}$/.test(unit.subject)
-      ? `Explique com suas palavras o que significa ${unit.subject}.`
-      : `Explique com suas palavras como funciona o cálculo de ${unit.subject}.`;
-  }
-
-  if (unit.category === "procedure") {
-    return `Explique com suas palavras como funciona ${unit.subject.toLowerCase()}.`;
-  }
-
-  if (unit.category === "risk") {
-    return `Explique com suas palavras por que ${unit.subject.toLowerCase()} pode trazer problemas.`;
-  }
-
-  return `Explique com suas palavras ${unit.subject.toLowerCase()}.`;
-}
-
-function buildExpectedAnswer(unit: KnowledgeUnit) {
-  if (unit.category === "definition" || unit.category === "formula") {
-    return ensureSentence(unit.statement);
-  }
-
-  return ensureSentence(unit.answer);
-}
-
-function buildReferenceAnswer(unit: KnowledgeUnit) {
-  return ensureSentence(unit.sourceExcerpt || unit.statement || unit.answer);
-}
-
-function buildRubric(unit: KnowledgeUnit, limit = 4) {
-  if (unit.listItems && unit.listItems.length > 0) {
-    return `Inclua pelo menos ${Math.min(limit, unit.listItems.length)} pontos centrais: ${unit.listItems
-      .slice(0, limit)
-      .join(", ")}.`;
-  }
-
-  const keywords = extractKeywords(`${unit.subject} ${unit.answer}`, limit);
-  if (keywords.length > 0) {
-    return `Vale mencionar: ${keywords.join(", ")}.`;
-  }
-
-  return "Retome a ideia principal, um detalhe importante e a finalidade desse ponto.";
-}
-
-function scoreChoiceCandidate(unit: KnowledgeUnit, candidate: KnowledgeUnit) {
-  const subjectOverlap = extractComparableTokens(unit.subject).filter((token) =>
-    extractComparableTokens(candidate.subject).includes(token),
-  ).length;
-  const answerOverlap = extractComparableTokens(unit.answer).filter((token) =>
-    extractComparableTokens(candidate.answer).includes(token),
-  ).length;
-  const sectionDistance = Math.abs(candidate.sectionIndex - unit.sectionIndex);
-  const answerLengthGap = Math.abs(candidate.answer.length - unit.answer.length);
-
-  return (
-    (candidate.category === unit.category ? 6 : 0) +
-    (candidate.sectionTitle === unit.sectionTitle ? 8 : 0) +
-    (sectionDistance <= 1 ? 4 : sectionDistance === 2 ? 2 : 0) +
-    Math.min(4, subjectOverlap * 2) +
-    Math.min(3, answerOverlap) +
-    (answerLengthGap <= 30 ? 3 : answerLengthGap <= 60 ? 1 : 0) +
-    candidate.importance
-  );
-}
-
-function isReasonableDistractor(value: string) {
-  const answer = cleanAnswer(value);
-  const normalized = normalizeForComparison(answer);
-  return (
-    answer.length >= 20 &&
-    answer.length <= 160 &&
-    !contextDependencyMatcher.test(normalized) &&
-    !trailingPrepositionMatcher.test(answer) &&
-    !inlineListDelimiterMatcher.test(answer)
-  );
-}
-
-function buildChoicePool(unit: KnowledgeUnit, units: KnowledgeUnit[]) {
-  return units
-    .filter((candidate) => candidate.id !== unit.id)
-    .filter((candidate) => isReasonableDistractor(candidate.answer))
-    .sort((left, right) => {
-      return scoreChoiceCandidate(unit, right) - scoreChoiceCandidate(unit, left);
-    })
-    .map((candidate) => ({
-      label: candidate.answer,
-      unit: candidate,
-    }));
-}
-
-function buildChoices(unit: KnowledgeUnit, candidates: ChoiceCandidate[]) {
-  const unique: Array<{ label: string; unit: KnowledgeUnit }> = [
-    {
-      label: unit.answer,
-      unit,
-    },
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = normalizeForComparison(candidate.label);
-    const exists = unique.some((item) => {
-      const current = normalizeForComparison(item.label);
-      return (
-        current === normalized ||
-        (current.length > 16 && normalized.includes(current)) ||
-        (normalized.length > 16 && current.includes(normalized))
-      );
-    });
-
-    if (!exists) {
-      unique.push(candidate);
-    }
-
-    if (unique.length >= 4) {
-      break;
-    }
-  }
-
-  if (unique.length < 4) {
-    return null;
-  }
-
-  const selected = unique.slice(0, 4);
-
-  return {
-    choices: selected.map(({ label }) => ({
-      id: normalizeForComparison(label).replace(/\s+/g, "-").slice(0, 48),
-      label,
-    })) satisfies QuestionChoice[],
-    distractorUnits: selected.slice(1).map((entry) => entry.unit),
-  };
-}
-
-function createMultipleChoiceQuestion(unit: KnowledgeUnit, units: KnowledgeUnit[]) {
-  if (unit.category === "procedure" && unit.answer.length > 120) {
-    return null;
-  }
-
-  const choiceSet = buildChoices(unit, buildChoicePool(unit, units));
-  if (!choiceSet) {
-    return null;
-  }
-
-  return {
-    question: {
-      type: "MULTIPLE_CHOICE",
-      prompt: buildPrimaryPromptSafe(unit),
-      topic: unit.topic,
-      choices: choiceSet.choices,
-      correctAnswer: unit.answer,
-      explanation: unit.statement,
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: choiceSet.distractorUnits,
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function replaceFirstInsensitive(source: string, search: string, replacement: string) {
-  const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return source.replace(new RegExp(escaped, "i"), replacement);
-}
-
-function createFillBlankQuestion(unit: KnowledgeUnit) {
-  if (!["definition", "purpose", "formula"].includes(unit.category)) {
-    return null;
-  }
-
-  if (unit.category !== "formula" && !/[.!?]$/.test(unit.statement)) {
-    return null;
-  }
-
-  const candidates = [unit.subject, ...unit.relatedTerms]
-    .filter((term) => term.length >= 5)
-    .filter((term) => normalizeForComparison(unit.statement).includes(normalizeForComparison(term)))
-    .sort((left, right) => right.length - left.length);
-
-  const blankTerm = candidates.find((term) => !weakWords.has(normalizeForComparison(term)));
-  if (!blankTerm) {
-    return null;
-  }
-
-  const prompt = replaceFirstInsensitive(unit.statement, blankTerm, "_____");
-  if (prompt === unit.statement || prompt.length < 30) {
-    return null;
-  }
-
-  return {
-    question: {
-      type: "FILL_BLANK",
-      prompt: `Complete a lacuna: "${prompt}"`,
-      topic: unit.topic,
-      correctAnswer: blankTerm,
-      explanation: `A expressao que completa essa ideia e "${blankTerm}".`,
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function createTrueFalseQuestion(unit: KnowledgeUnit, units: KnowledgeUnit[], index: number) {
-  if (
-    unit.category === "procedure" ||
-    unit.statement.length > 220 ||
-    /^[>\-•▪►]/.test(unit.statement) ||
-    !/[.!?]$/.test(unit.statement)
-  ) {
-    return null;
-  }
-
-  const shouldBeTrue = index % 2 === 0;
-  let statement = unit.statement;
-
-  if (!shouldBeTrue) {
-    const alternatives = units.filter(
-      (candidate) =>
-        candidate.id !== unit.id &&
-        candidate.category === unit.category &&
-        normalizeForComparison(candidate.answer) !== normalizeForComparison(unit.answer),
-    );
-
-    const alternative = [...alternatives].sort((left, right) => scoreChoiceCandidate(unit, right) - scoreChoiceCandidate(unit, left))[0];
-    if (!alternative) {
-      return null;
-    }
-
-    if (normalizeForComparison(statement).includes(normalizeForComparison(unit.answer))) {
-      statement = replaceFirstInsensitive(statement, unit.answer, alternative.answer);
-    } else if (normalizeForComparison(statement).includes(normalizeForComparison(unit.subject))) {
-      statement = replaceFirstInsensitive(statement, unit.subject, alternative.subject);
-    }
-
-    if (normalizeForComparison(statement) === normalizeForComparison(unit.statement)) {
-      return null;
-    }
-  }
-
-  return {
-    question: {
-      type: "TRUE_FALSE",
-      prompt: `Verdadeiro ou falso: ${statement}`,
-      topic: unit.topic,
-      correctAnswer: shouldBeTrue ? "true" : "false",
-      explanation: shouldBeTrue
-        ? "A afirmacao acompanha o material."
-        : `No material, a formulacao correta aparece assim: ${unit.statement}`,
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function createShortAnswerQuestion(unit: KnowledgeUnit, feynman = false) {
-  return {
-    question: {
-      type: "SHORT_ANSWER",
-      prompt: feynman ? buildFeynmanPromptSafe(unit) : buildPrimaryPromptSafe(unit),
-      topic: unit.topic,
-      referenceAnswer: buildReferenceAnswer(unit),
-      rubric: buildRubric(unit, feynman ? 5 : 4),
-      explanation: "A melhor resposta recupera as ideias principais sem depender de copia literal.",
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function createShortAnswerVariation(unit: KnowledgeUnit) {
-  const prompt = buildReinforcementPromptSafe(unit);
-  if (!prompt || normalizeForComparison(prompt) === normalizeForComparison(buildPrimaryPromptSafe(unit))) {
-    return null;
-  }
-
-  return {
-    question: {
-      type: "SHORT_ANSWER",
-      prompt,
-      topic: unit.topic,
-      referenceAnswer: buildReferenceAnswer(unit),
-      rubric: buildRubric(unit, 3),
-      explanation: "Use o trecho de referÃªncia para checar se vocÃª recuperou o ponto central sem copiar tudo.",
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function createShortAnswerRetentionVariation(unit: KnowledgeUnit) {
-  const prompt = buildRetentionPromptSafe(unit);
-  const existingPrompts = [buildPrimaryPromptSafe(unit), buildReinforcementPromptSafe(unit)].filter(
-    (existing): existing is string => Boolean(existing),
-  );
-  if (!prompt || existingPrompts.some((existing) => normalizeForComparison(existing) === normalizeForComparison(prompt))) {
-    return null;
-  }
-
-  return {
-    question: {
-      type: "SHORT_ANSWER",
-      prompt,
-      topic: unit.topic,
-      referenceAnswer: buildReferenceAnswer(unit),
-      rubric: buildRubric(unit, 3),
-      explanation: "Retome o ponto central com suas palavras e use o trecho de referência para conferir os detalhes.",
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function toFeynmanPrompt(prompt: string) {
-  const body = prompt.replace(/\?$/, "").trim();
-  return `Explique com suas palavras ${body.charAt(0).toLowerCase()}${body.slice(1)}.`;
-}
-
-function createFeynmanVariationQuestion(unit: KnowledgeUnit) {
-  const prompt = buildRetentionPromptSafe(unit) ?? buildReinforcementPromptSafe(unit);
-  const primaryPrompt = buildFeynmanPromptSafe(unit);
-
-  if (!prompt) {
-    return null;
-  }
-
-  const feynmanPrompt = toFeynmanPrompt(prompt);
-  if (normalizeForComparison(feynmanPrompt) === normalizeForComparison(primaryPrompt)) {
-    return null;
-  }
-
-  return {
-    question: {
-      type: "SHORT_ANSWER",
-      prompt: feynmanPrompt,
-      topic: unit.topic,
-      referenceAnswer: buildReferenceAnswer(unit),
-      rubric: buildRubric(unit, 5),
-      explanation: "A melhor resposta ensina a ideia com clareza e recupera os detalhes realmente importantes.",
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function createShortAnswerPracticalVariation(unit: KnowledgeUnit) {
-  const prompt = buildPracticalPromptSafe(unit);
-  const existingPrompts = [
-    buildPrimaryPromptSafe(unit),
-    buildReinforcementPromptSafe(unit),
-    buildRetentionPromptSafe(unit),
-  ].filter((existing): existing is string => Boolean(existing));
-
-  if (!prompt || existingPrompts.some((existing) => normalizeForComparison(existing) === normalizeForComparison(prompt))) {
-    return null;
-  }
-
-  return {
-    question: {
-      type: "SHORT_ANSWER",
-      prompt,
-      topic: unit.topic,
-      referenceAnswer: buildReferenceAnswer(unit),
-      rubric: buildRubric(unit, 3),
-      explanation: "Relacione a ideia com a rotina descrita no material e confira os detalhes no trecho de referência.",
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function createFlashcardQuestion(unit: KnowledgeUnit) {
-  return {
-    question: {
-      type: "FLASHCARD",
-      prompt: buildPrimaryPromptSafe(unit),
-      topic: unit.topic,
-      correctAnswer: buildExpectedAnswer(unit),
-      referenceAnswer: buildReferenceAnswer(unit),
-      explanation: "Compare sua lembranca com o trecho de referencia antes de marcar como foi.",
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function createFlashcardVariation(unit: KnowledgeUnit) {
-  const prompt = buildReinforcementPromptSafe(unit);
-  if (!prompt || normalizeForComparison(prompt) === normalizeForComparison(buildPrimaryPromptSafe(unit))) {
-    return null;
-  }
-
-  return {
-    question: {
-      type: "FLASHCARD",
-      prompt,
-      topic: unit.topic,
-      correctAnswer: buildExpectedAnswer(unit),
-      referenceAnswer: buildReferenceAnswer(unit),
-      explanation: "Compare sua lembranÃ§a com o trecho de referÃªncia antes de marcar como foi.",
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function createFlashcardRetentionVariation(unit: KnowledgeUnit) {
-  const prompt = buildRetentionPromptSafe(unit);
-  const existingPrompts = [buildPrimaryPromptSafe(unit), buildReinforcementPromptSafe(unit)].filter(
-    (existing): existing is string => Boolean(existing),
-  );
-  if (!prompt || existingPrompts.some((existing) => normalizeForComparison(existing) === normalizeForComparison(prompt))) {
-    return null;
-  }
-
-  return {
-    question: {
-      type: "FLASHCARD",
-      prompt,
-      topic: unit.topic,
-      correctAnswer: buildExpectedAnswer(unit),
-      referenceAnswer: buildReferenceAnswer(unit),
-      explanation: "Compare sua lembrança com o trecho de referência antes de marcar como foi.",
-    } satisfies QuestionDraft,
-    unit,
-    distractorUnits: [],
-  } satisfies GeneratedQuestionCandidate;
-}
-
-function areQuestionsTooSimilar(left: QuestionDraft, right: QuestionDraft) {
-  const leftTokens = new Set(extractComparableTokens(left.prompt));
-  const rightTokens = new Set(extractComparableTokens(right.prompt));
-  const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length;
-  const denominator = Math.max(1, Math.min(leftTokens.size, rightTokens.size));
-
-  return shared / denominator >= 0.8;
-}
-
-function buildPromptSignature(prompt: string) {
-  return normalizeForComparison(prompt);
-}
-
-function validateGeneratedQuestion(
-  candidate: GeneratedQuestionCandidate,
-  acceptedQuestions: QuestionDraft[],
-): QuestionQualityResult {
-  const { question, unit, distractorUnits } = candidate;
-  const prompt = question.prompt.trim();
-  const normalizedPrompt = normalizeForComparison(prompt);
-  const normalizedSubject = normalizeForComparison(unit.subject);
-  const answerReference = question.correctAnswer ?? question.referenceAnswer ?? unit.answer;
-  const reasons: string[] = [];
-  let score = unit.importance;
-
-  if (prompt.length < 10 || brokenPromptMatcher.test(normalizedPrompt)) {
-    reasons.push("enunciado-fraco");
-  }
-
-  if (looksLikeSystemNoise(prompt) || looksLikeSystemNoise(answerReference)) {
-    reasons.push("ruido-de-sistema");
-  }
-
-  if (contextDependencyMatcher.test(prompt) || contextDependencyMatcher.test(unit.sourceExcerpt)) {
-    reasons.push("depende-de-contexto-ausente");
-  }
-
-  if (unit.sourceExcerpt.length < 24) {
-    reasons.push("fonte-curta");
-  }
-
-  if (
-    !["comparison", "procedure"].includes(unit.category) &&
-    !/^[A-Z]{2,5}$/.test(unit.subject) &&
-    (!isValidConceptCandidate(unit.subject) || weakWords.has(normalizedSubject))
-  ) {
-    reasons.push("assunto-fraco");
-  }
-
-  if (definitionStylePromptMatcher.test(normalizedPrompt)) {
-    const concept = prompt.replace(/^O que é\s+/i, "").replace(/^O que e\s+/i, "").replace(/\?$/, "");
-    if (!isValidConceptCandidate(concept)) {
-      reasons.push("conceito-invalido");
-    }
-
-    if (!isDefinitionAnswerComplete(answerReference)) {
-      reasons.push("resposta-fragmentada");
-    } else {
-      score += 5;
-    }
-  }
-
-  if (/^para que serve\s+/i.test(normalizedPrompt)) {
-    const subject = normalizedPrompt.replace(/^para que serve\s+/i, "").replace(/\?$/, "");
-    if (!isValidConceptCandidate(subject)) {
-      reasons.push("finalidade-sem-conceito");
-    }
-
-    if (!isPurposeAnswerComplete(answerReference)) {
-      reasons.push("finalidade-fragmentada");
-    }
-  }
-
-  if (/^como e calculado\s+/i.test(normalizedPrompt)) {
-    const subject = normalizedPrompt.replace(/^como e calculado\s+/i, "").replace(/\?$/, "");
-    if (genericFormulaSubjectMatcher.test(subject) || !hasSpecificWords(subject)) {
-      reasons.push("calculo-generico");
-    }
-  }
-
-  if (/^qual e o risco ou impacto ligado a\s+/i.test(normalizedPrompt)) {
-    const subject = normalizedPrompt.replace(/^qual e o risco ou impacto ligado a\s+/i, "").replace(/\?$/, "");
-    if (!isValidConceptCandidate(subject) || !riskMatcher.test(unit.statement)) {
-      reasons.push("risco-fraco");
-    }
-  }
-
-  if (question.type === "MULTIPLE_CHOICE") {
-    const choices = question.choices ?? [];
-    const normalizedChoices = choices.map((choice) => normalizeForComparison(choice.label));
-    const duplicates = new Set(normalizedChoices);
-
-    if (choices.length < 4 || duplicates.size !== choices.length) {
-      reasons.push("alternativas-invalidas");
-    }
-
-    if (!choices.some((choice) => normalizeForComparison(choice.label) === normalizeForComparison(question.correctAnswer ?? ""))) {
-      reasons.push("resposta-correta-ausente");
-    }
-
-    if (distractorUnits.some((distractor) => Math.abs(distractor.sectionIndex - unit.sectionIndex) > 2)) {
-      reasons.push("distratores-distantes");
-    } else {
-      score += 4;
-    }
-  }
-
-  if (question.type === "TRUE_FALSE" && contextDependencyMatcher.test(question.prompt)) {
-    reasons.push("afirmacao-fragmentada");
-  }
-
-  if (
-    (question.type === "TRUE_FALSE" || question.type === "FILL_BLANK") &&
-    unit.category !== "formula" &&
-    !/[.!?]$/.test(unit.statement)
-  ) {
-    reasons.push("fonte-fragmentada");
-  }
-
-  if (unit.category === "formula" && genericFormulaSubjectMatcher.test(normalizedSubject)) {
-    reasons.push("formula-sem-conceito");
-  }
-
-  if (
-    unit.category === "formula" &&
-    !normalizedPrompt.startsWith("o que significa") &&
-    !normalizedPrompt.startsWith("complete a lacuna") &&
-    !normalizedPrompt.startsWith("verdadeiro ou falso") &&
-    !normalizedPrompt.startsWith("explique com suas palavras") &&
-    !normalizedPrompt.startsWith("como e calculado")
-  ) {
-    reasons.push("formula-sem-template");
-  }
-
-  if (
-    unit.category === "formula" &&
-    !normalizedPrompt.startsWith("o que significa") &&
-    !/^[A-ZÀ-Ý]/u.test(answerReference) &&
-    !answerReference.includes("=")
-  ) {
-    reasons.push("formula-sem-expressao");
-  }
-
-  if (
-    acceptedQuestions.some(
-      (acceptedQuestion) =>
-        buildPromptSignature(acceptedQuestion.prompt) === buildPromptSignature(question.prompt) ||
-        areQuestionsTooSimilar(acceptedQuestion, question),
-    )
-  ) {
-    reasons.push("pergunta-repetida");
-  }
-
-  if (importanceMatcher.test(unit.statement) || formulaMatcher.test(unit.statement) || /serve para/i.test(unit.statement)) {
-    score += 3;
-  }
-
-  if (unit.sectionIndex <= 1) {
-    score += 1;
-  }
-
-  return {
-    valid: reasons.length === 0,
-    score,
-    reasons,
-  };
-}
-
-function uniqueQuestions(questions: Array<GeneratedQuestionCandidate | null>, fallback: string) {
-  const seen = new Set<string>();
-  const result: QuestionDraft[] = [];
-
-  const ranked = questions
-    .filter((question): question is GeneratedQuestionCandidate => Boolean(question))
-    .map((question) => ({
-      candidate: question,
-      quality: validateGeneratedQuestion(question, []).score,
-      reasons: [] as string[],
-    }));
-
-  ranked.sort((left, right) => right.quality - left.quality);
-
-  for (const entry of ranked) {
-    const question = entry.candidate.question;
-    const quality = validateGeneratedQuestion(entry.candidate, result);
-    entry.quality = quality.score;
-    entry.reasons = quality.reasons;
-
-    if (!quality.valid) {
-      continue;
-    }
-
-    const key = buildPromptSignature(question.prompt);
-    if (seen.has(key)) {
-      continue;
-    }
-
-    if (question.prompt.length < 10) {
-      continue;
-    }
-
-    seen.add(key);
-    result.push(question);
-  }
-
-  if (result.length > 0) {
-    return result;
-  }
-
-  return [
-    {
-      type: "SHORT_ANSWER",
-      prompt: "Resuma a ideia principal do material em 2 ou 3 frases.",
-      topic: "Resumo geral",
-      referenceAnswer: fallback,
-      rubric: "Mencione o tema central, um detalhe importante e a conclusao principal.",
-      explanation: "A resposta ideal mostra que voce entendeu o panorama geral.",
-    } satisfies QuestionDraft,
-  ];
-}
-
-function mergeUniqueUnits(groups: KnowledgeUnit[][]) {
-  const seen = new Set<string>();
-  const merged: KnowledgeUnit[] = [];
-
-  for (const group of groups) {
-    for (const unit of group) {
-      if (seen.has(unit.id)) {
-        continue;
-      }
-
-      seen.add(unit.id);
-      merged.push(unit);
-    }
-  }
-
-  return merged;
-}
-
-function takeBalancedBySection(units: KnowledgeUnit[], limit: number) {
+function groupBySection(units: KnowledgeUnit[]) {
   const groups = new Map<number, KnowledgeUnit[]>();
 
   for (const unit of units) {
@@ -2662,23 +872,40 @@ function takeBalancedBySection(units: KnowledgeUnit[], limit: number) {
     groups.set(unit.sectionIndex, current);
   }
 
-  const balanced: KnowledgeUnit[] = [];
-  const sectionIndexes = [...groups.keys()].sort((left, right) => left - right);
+  return groups;
+}
 
-  while (balanced.length < limit) {
+function shuffleArray<T>(items: T[]) {
+  const result = [...items];
+
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const nextIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[nextIndex]] = [result[nextIndex], result[index]];
+  }
+
+  return result;
+}
+
+function takeBalancedUnits(units: KnowledgeUnit[], limit: number) {
+  const groups = new Map<number, KnowledgeUnit[]>(
+    [...groupBySection(units).entries()].map(([sectionIndex, group]) => [sectionIndex, shuffleArray(group)]),
+  );
+  const baseSectionIndexes = [...groups.keys()].sort((left, right) => left - right);
+  const result: KnowledgeUnit[] = [];
+
+  while (result.length < limit) {
     let added = false;
+    const sectionIndexes = shuffleArray(baseSectionIndexes);
 
     for (const sectionIndex of sectionIndexes) {
-      const group = groups.get(sectionIndex);
-      const next = group?.shift();
+      const next = groups.get(sectionIndex)?.shift();
       if (!next) {
         continue;
       }
 
-      balanced.push(next);
+      result.push(next);
       added = true;
-
-      if (balanced.length >= limit) {
+      if (result.length >= limit) {
         break;
       }
     }
@@ -2688,305 +915,650 @@ function takeBalancedBySection(units: KnowledgeUnit[], limit: number) {
     }
   }
 
-  return balanced;
+  return result;
 }
 
-function selectDefinitionUnits(units: KnowledgeUnit[], limit: number) {
-  return takeBalancedBySection(
-    units
-    .filter((unit) => unit.category === "definition")
-    .filter((unit) => isValidConceptCandidate(unit.subject))
+function groupStructuredQuestionsBySection(questions: ParsedStructuredQuestion[]) {
+  const groups = new Map<number, ParsedStructuredQuestion[]>();
+
+  for (const question of questions) {
+    const current = groups.get(question.sectionIndex) ?? [];
+    current.push(question);
+    groups.set(question.sectionIndex, current);
+  }
+
+  return groups;
+}
+
+function takeBalancedStructuredQuestions(questions: ParsedStructuredQuestion[], limit: number) {
+  const groups = new Map<number, ParsedStructuredQuestion[]>(
+    [...groupStructuredQuestionsBySection(questions).entries()].map(([sectionIndex, group]) => [
+      sectionIndex,
+      shuffleArray(group),
+    ]),
+  );
+  const baseSectionIndexes = [...groups.keys()].sort((left, right) => left - right);
+  const result: ParsedStructuredQuestion[] = [];
+
+  while (result.length < limit) {
+    let added = false;
+    const sectionIndexes = shuffleArray(baseSectionIndexes);
+
+    for (const sectionIndex of sectionIndexes) {
+      const next = groups.get(sectionIndex)?.shift();
+      if (!next) {
+        continue;
+      }
+
+      result.push(next);
+      added = true;
+      if (result.length >= limit) {
+        break;
+      }
+    }
+
+    if (!added) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function selectUnitsByKinds(units: KnowledgeUnit[], kinds: KnowledgeKind[], limit: number) {
+  const filtered = units.filter((unit) => kinds.includes(unit.kind));
+  return takeBalancedUnits(filtered, limit);
+}
+
+function buildExpectedAnswer(unit: KnowledgeUnit) {
+  return unit.expectedAnswer;
+}
+
+function buildReferenceExcerpt(unit: KnowledgeUnit) {
+  return unit.referenceExcerpt;
+}
+
+function buildRubric(unit: KnowledgeUnit, limit = 4) {
+  const keywords = unit.keywords.slice(0, limit);
+  if (keywords.length === 0) {
+    return "Recupere a ideia central com suas palavras.";
+  }
+
+  if (keywords.length === 1) {
+    return `Mencione ${keywords[0]} ao explicar sua resposta.`;
+  }
+
+  const body = `${keywords.slice(0, -1).join(", ")} e ${keywords[keywords.length - 1]}`;
+  return `Mencione ${body} ao explicar sua resposta.`;
+}
+
+function buildDirectPrompt(unit: KnowledgeUnit) {
+  switch (unit.kind) {
+    case "definition":
+      return `O que e ${unit.topic}?`;
+    case "purpose":
+      return `Para que serve ${unit.topic}?`;
+    case "procedure":
+      return `Como funciona ${unit.topic}?`;
+    case "rule":
+      return `Qual e a regra principal sobre ${unit.topic}?`;
+    case "formula":
+      return `Como e calculado ${unit.topic}?`;
+    case "comparison":
+      return `Qual e a diferenca entre ${unit.topic}?`;
+    case "list":
+      return `Quais sao os pontos principais de ${unit.topic}?`;
+  }
+}
+
+function buildQuickReviewPrompt(unit: KnowledgeUnit) {
+  switch (unit.kind) {
+    case "definition":
+      return `Resuma em uma frase o conceito de ${unit.topic}.`;
+    case "purpose":
+      return `Que problema ${unit.topic} ajuda a resolver?`;
+    case "procedure":
+      return `Explique rapidamente como ${unit.topic} acontece na pratica.`;
+    case "rule":
+      return `Que cuidado principal voce deve lembrar sobre ${unit.topic}?`;
+    case "formula":
+      return `O que o calculo de ${unit.topic} mostra?`;
+    case "comparison":
+      return `Resuma a diferenca central em ${unit.topic}.`;
+    case "list":
+      return `Cite rapidamente os pontos centrais de ${unit.topic}.`;
+  }
+}
+
+function buildFeynmanPrompt(unit: KnowledgeUnit) {
+  return `Explique ${unit.topic.toLowerCase()} como se estivesse ensinando a um colega novo.`;
+}
+
+function buildMultipleChoicePrompt(unit: KnowledgeUnit) {
+  switch (unit.kind) {
+    case "definition":
+      return `Qual alternativa define melhor ${unit.topic}?`;
+    case "purpose":
+      return `Qual alternativa explica melhor para que serve ${unit.topic}?`;
+    case "procedure":
+      return `Qual alternativa descreve corretamente como ${unit.topic} funciona?`;
+    case "rule":
+      return `Qual alternativa resume melhor a regra sobre ${unit.topic}?`;
+    case "formula":
+      return `Qual alternativa descreve corretamente ${unit.topic}?`;
+    case "comparison":
+      return `Qual alternativa diferencia corretamente ${unit.topic}?`;
+    case "list":
+      return `Qual alternativa corresponde melhor a ${unit.topic}?`;
+  }
+}
+
+function buildFlashcardPrompt(unit: KnowledgeUnit) {
+  return unit.topic;
+}
+
+function buildChoiceId(unit: KnowledgeUnit, index: number) {
+  return `${normalizeForComparison(unit.topic)}-${index + 1}`;
+}
+
+function isBadAlternativeText(value: string) {
+  return !isCompleteKnowledgeText(value) || startsLikeBadFragment(value);
+}
+
+function hasComparableLength(left: string, right: string) {
+  const leftWords = countWords(left);
+  const rightWords = countWords(right);
+
+  if (leftWords === 0 || rightWords === 0) {
+    return false;
+  }
+
+  const ratio = leftWords / rightWords;
+  return ratio >= 0.55 && ratio <= 1.8;
+}
+
+function buildDistractorPool(unit: KnowledgeUnit, units: KnowledgeUnit[]) {
+  return units
+    .filter((candidate) => candidate.id !== unit.id)
+    .filter((candidate) => candidate.kind === unit.kind || conceptSimilarity(candidate.topic, unit.topic) >= 0.2)
+    .filter((candidate) => !isBadAlternativeText(candidate.expectedAnswer))
+    .filter((candidate) => normalizeForComparison(candidate.expectedAnswer) !== normalizeForComparison(unit.expectedAnswer))
+    .filter((candidate) => conceptSimilarity(candidate.expectedAnswer, unit.expectedAnswer) < 0.72)
+    .filter((candidate) => hasComparableLength(candidate.expectedAnswer, unit.expectedAnswer))
     .sort((left, right) => {
-      const preferredMatcher =
-        /\b(cobertura de estoque|saida media|inventario|perda|ruptura|curva abc|pedido extra|alocacao de gondola|estoque padrao)\b/i;
       const leftScore =
-        left.importance +
-        (preferredMatcher.test(left.subject) ? 6 : 0) +
-        (countWords(left.subject) >= 2 && countWords(left.subject) <= 4 ? 2 : 0) +
-        (isDefinitionAnswerComplete(left.answer) ? 3 : 0);
+        conceptSimilarity(`${left.topic} ${left.referenceExcerpt}`, `${unit.topic} ${unit.referenceExcerpt}`) +
+        (left.sectionIndex === unit.sectionIndex ? 0.25 : 0) +
+        left.importance / 20;
       const rightScore =
-        right.importance +
-        (preferredMatcher.test(right.subject) ? 6 : 0) +
-        (countWords(right.subject) >= 2 && countWords(right.subject) <= 4 ? 2 : 0) +
-        (isDefinitionAnswerComplete(right.answer) ? 3 : 0);
+        conceptSimilarity(`${right.topic} ${right.referenceExcerpt}`, `${unit.topic} ${unit.referenceExcerpt}`) +
+        (right.sectionIndex === unit.sectionIndex ? 0.25 : 0) +
+        right.importance / 20;
       return rightScore - leftScore;
-    })
-    , limit,
+    });
+}
+
+function validateMultipleChoiceChoices(correctAnswer: string, choices: QuestionChoice[]) {
+  if (choices.length !== 4) {
+    return false;
+  }
+
+  const normalizedLabels = choices.map((choice) => buildPromptSignature(choice.label));
+  if (new Set(normalizedLabels).size !== choices.length) {
+    return false;
+  }
+
+  if (!choices.some((choice) => buildPromptSignature(choice.label) === buildPromptSignature(correctAnswer))) {
+    return false;
+  }
+
+  const correctChoice = choices.find(
+    (choice) => buildPromptSignature(choice.label) === buildPromptSignature(correctAnswer),
+  );
+  if (!correctChoice) {
+    return false;
+  }
+
+  for (const choice of choices) {
+    if (isBadAlternativeText(choice.label)) {
+      return false;
+    }
+
+    if (
+      choice.id !== correctChoice.id &&
+      conceptSimilarity(choice.label, correctAnswer) >= 0.82
+    ) {
+      return false;
+    }
+
+    if (!hasComparableLength(choice.label, correctAnswer)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function rotateChoices(choices: QuestionChoice[], seed: number) {
+  const index = seed % choices.length;
+  return [...choices.slice(index), ...choices.slice(0, index)];
+}
+
+function createMultipleChoiceQuestion(unit: KnowledgeUnit, units: KnowledgeUnit[]) {
+  const distractors = buildDistractorPool(unit, units);
+  const selected = distractors.slice(0, 3);
+
+  if (selected.length < 3) {
+    return null;
+  }
+
+  const choices = rotateChoices(
+    [
+      { id: buildChoiceId(unit, 0), label: unit.expectedAnswer },
+      ...selected.map((candidate, index) => ({
+        id: buildChoiceId(candidate, index + 1),
+        label: candidate.expectedAnswer,
+      })),
+    ],
+    unit.importance,
+  );
+
+  if (!validateMultipleChoiceChoices(unit.expectedAnswer, choices)) {
+    return null;
+  }
+
+  return {
+    question: {
+      type: "MULTIPLE_CHOICE",
+      prompt: buildMultipleChoicePrompt(unit),
+      topic: unit.topic,
+      choices,
+      correctAnswer: unit.expectedAnswer,
+      explanation: unit.expectedAnswer,
+    } satisfies QuestionDraft,
+    unit,
+  } satisfies GeneratedQuestionCandidate;
+}
+
+function createShortAnswerQuestion(unit: KnowledgeUnit, promptBuilder: (unit: KnowledgeUnit) => string) {
+  return {
+    question: {
+      type: "SHORT_ANSWER",
+      prompt: promptBuilder(unit),
+      topic: unit.topic,
+      correctAnswer: buildExpectedAnswer(unit),
+      referenceAnswer: buildReferenceExcerpt(unit),
+      rubric: buildRubric(unit),
+      explanation: "A resposta ideal recupera a ideia central com suas palavras.",
+    } satisfies QuestionDraft,
+    unit,
+  } satisfies GeneratedQuestionCandidate;
+}
+
+function createFlashcardQuestion(unit: KnowledgeUnit) {
+  return {
+    question: {
+      type: "FLASHCARD",
+      prompt: buildFlashcardPrompt(unit),
+      topic: unit.topic,
+      correctAnswer: buildExpectedAnswer(unit),
+      referenceAnswer: buildReferenceExcerpt(unit),
+      explanation: "Compare a resposta esperada com o trecho de apoio antes de marcar.",
+    } satisfies QuestionDraft,
+    unit,
+  } satisfies GeneratedQuestionCandidate;
+}
+
+function buildStructuredRubric(question: ParsedStructuredQuestion, limit = 4) {
+  const keywords = extractReferenceKeywords(`${question.prompt} ${question.expectedAnswer}`, limit);
+  if (keywords.length === 0) {
+    return "Recupere os pontos centrais da resposta original.";
+  }
+
+  if (keywords.length === 1) {
+    return `Mencione ${keywords[0]} ao responder.`;
+  }
+
+  return `Mencione ${keywords.slice(0, -1).join(", ")} e ${keywords[keywords.length - 1]} ao responder.`;
+}
+
+function buildAssociationPrompt(question: ParsedStructuredQuestion) {
+  const item = question.associationItem ?? question.prompt;
+  return `${item} esta associada a que?`;
+}
+
+function createStructuredShortAnswerQuestion(question: ParsedStructuredQuestion): QuestionDraft {
+  return {
+    type: "SHORT_ANSWER",
+    prompt: question.promptStyle === "ASSOCIATION" ? buildAssociationPrompt(question) : question.prompt,
+    topic: question.topic,
+    correctAnswer: question.expectedAnswer,
+    referenceAnswer: question.referenceExcerpt,
+    rubric: buildStructuredRubric(question),
+    explanation: "A resposta ideal deve recuperar a resposta original com fidelidade.",
+  };
+}
+
+function createStructuredFlashcardQuestion(question: ParsedStructuredQuestion): QuestionDraft {
+  return {
+    type: "FLASHCARD",
+    prompt: question.promptStyle === "ASSOCIATION" ? (question.associationItem ?? question.prompt) : question.prompt,
+    topic: question.topic,
+    correctAnswer: question.expectedAnswer,
+    referenceAnswer: question.referenceExcerpt,
+    explanation: "Compare o verso com a resposta original antes de marcar seu desempenho.",
+  };
+}
+
+function hasLooselyComparableLength(left: string, right: string) {
+  const leftWords = countWords(left);
+  const rightWords = countWords(right);
+
+  if (leftWords === 0 || rightWords === 0) {
+    return false;
+  }
+
+  const ratio = leftWords / rightWords;
+  return ratio >= 0.4 && ratio <= 2.4;
+}
+
+function isSafeStructuredAlternative(value: string) {
+  const cleaned = trimOuterPunctuation(value);
+  return (
+    cleaned.length >= 6 &&
+    !looksLikeSystemNoise(cleaned) &&
+    !hasBrokenExtractionSymbols(cleaned) &&
+    !isMetaInstructionLine(cleaned)
   );
 }
 
-function selectFormulaUnits(units: KnowledgeUnit[], limit: number) {
-  return takeBalancedBySection(
-    units
-    .filter((unit) => unit.category === "formula")
+function buildStructuredChoiceId(question: ParsedStructuredQuestion, index: number) {
+  return `${normalizeForComparison(question.topic || question.prompt).slice(0, 48)}-${index + 1}`;
+}
+
+function buildStructuredDistractorPool(
+  question: ParsedStructuredQuestion,
+  questions: ParsedStructuredQuestion[],
+) {
+  const sameAssociationGroup = questions.filter(
+    (candidate) =>
+      question.promptStyle === "ASSOCIATION" &&
+      candidate.associationGroup &&
+      candidate.associationGroup === question.associationGroup,
+  );
+
+  const source = sameAssociationGroup.length >= 4 ? sameAssociationGroup : questions;
+  return source
+    .filter((candidate) => candidate.prompt !== question.prompt)
     .filter(
-      (unit) =>
-        !genericFormulaSubjectMatcher.test(normalizeForComparison(unit.subject)) &&
-        !contextDependencyMatcher.test(unit.answer) &&
-        (/^[A-Z]{2,5}$/.test(unit.subject) || unit.answer.includes("=") || (unit.answer.includes("/") && countWords(unit.answer) <= 8)),
+      (candidate) =>
+        normalizeForComparison(candidate.expectedAnswer) !== normalizeForComparison(question.expectedAnswer),
     )
+    .filter((candidate) => isSafeStructuredAlternative(candidate.expectedAnswer))
+    .filter((candidate) => conceptSimilarity(candidate.expectedAnswer, question.expectedAnswer) < 0.82)
+    .filter((candidate) => hasLooselyComparableLength(candidate.expectedAnswer, question.expectedAnswer))
     .sort((left, right) => {
-      const preferredMatcher = /\b(cobertura de estoque|estoque padrao|perda bruta|dias de estoque)\b/i;
       const leftScore =
-        left.importance +
-        (preferredMatcher.test(left.subject) ? 5 : 0) +
-        (/^[A-ZÀ-Ý]/u.test(left.answer) ? 3 : 0) +
-        (left.answer.includes("=") ? 4 : 0) +
-        (countWords(left.answer) <= 8 ? 2 : 0);
+        (left.sectionIndex === question.sectionIndex ? 1 : 0) +
+        conceptSimilarity(`${left.topic} ${left.prompt}`, `${question.topic} ${question.prompt}`);
       const rightScore =
-        right.importance +
-        (preferredMatcher.test(right.subject) ? 5 : 0) +
-        (/^[A-ZÀ-Ý]/u.test(right.answer) ? 3 : 0) +
-        (right.answer.includes("=") ? 4 : 0) +
-        (countWords(right.answer) <= 8 ? 2 : 0);
+        (right.sectionIndex === question.sectionIndex ? 1 : 0) +
+        conceptSimilarity(`${right.topic} ${right.prompt}`, `${question.topic} ${question.prompt}`);
       return rightScore - leftScore;
-    })
-    , limit,
+    });
+}
+
+function validateStructuredMultipleChoiceChoices(correctAnswer: string, choices: QuestionChoice[]) {
+  if (choices.length !== 4) {
+    return false;
+  }
+
+  const signatures = choices.map((choice) => buildPromptSignature(choice.label));
+  if (new Set(signatures).size !== choices.length) {
+    return false;
+  }
+
+  if (!choices.some((choice) => buildPromptSignature(choice.label) === buildPromptSignature(correctAnswer))) {
+    return false;
+  }
+
+  return choices.every((choice) => {
+    if (!isSafeStructuredAlternative(choice.label)) {
+      return false;
+    }
+
+    if (buildPromptSignature(choice.label) === buildPromptSignature(correctAnswer)) {
+      return true;
+    }
+
+    return (
+      conceptSimilarity(choice.label, correctAnswer) < 0.86 &&
+      hasLooselyComparableLength(choice.label, correctAnswer)
+    );
+  });
+}
+
+function createStructuredMultipleChoiceQuestion(
+  question: ParsedStructuredQuestion,
+  questions: ParsedStructuredQuestion[],
+) {
+  const selected = buildStructuredDistractorPool(question, questions).slice(0, 3);
+  if (selected.length < 3) {
+    return null;
+  }
+
+  const choices = rotateChoices(
+    [
+      { id: buildStructuredChoiceId(question, 0), label: question.expectedAnswer },
+      ...selected.map((candidate, index) => ({
+        id: buildStructuredChoiceId(candidate, index + 1),
+        label: candidate.expectedAnswer,
+      })),
+    ],
+    countWords(question.expectedAnswer),
+  );
+
+  if (!validateStructuredMultipleChoiceChoices(question.expectedAnswer, choices)) {
+    return null;
+  }
+
+  return {
+    type: "MULTIPLE_CHOICE",
+    prompt: question.promptStyle === "ASSOCIATION" ? `${question.associationItem ?? question.prompt} esta associada a qual descricao?` : question.prompt,
+    topic: question.topic,
+    choices,
+    correctAnswer: question.expectedAnswer,
+    explanation: question.expectedAnswer,
+  } satisfies QuestionDraft;
+}
+
+function areQuestionsTooSimilar(left: QuestionDraft, right: QuestionDraft) {
+  return (
+    buildPromptSignature(left.prompt) === buildPromptSignature(right.prompt) ||
+    conceptSimilarity(left.prompt, right.prompt) >= 0.9
   );
 }
 
-function selectPurposeUnits(units: KnowledgeUnit[], limit: number) {
-  return takeBalancedBySection(
-    units
-    .filter((unit) => unit.category === "purpose")
-    .sort((left, right) => {
-      const preferredMatcher =
-        /\b(relatorio|curva abc|pedido extra|cobertura|produtos nao atendidos|falta x excesso|estoque sem vendas)\b/i;
-      const leftScore =
-        left.importance +
-        (preferredMatcher.test(left.subject) ? 5 : 0) +
-        (isPreferredPurposeSubject(left.subject) ? 4 : 0) +
-        (left.subject.split(/\s+/).length > 1 ? 1 : 0);
-      const rightScore =
-        right.importance +
-        (preferredMatcher.test(right.subject) ? 5 : 0) +
-        (isPreferredPurposeSubject(right.subject) ? 4 : 0) +
-        (right.subject.split(/\s+/).length > 1 ? 1 : 0);
-      return rightScore - leftScore;
-    })
-    , limit,
+function isValidQuestionDraft(question: QuestionDraft, answerReference: string) {
+  const minimumPromptLength = question.type === "FLASHCARD" ? 3 : 10;
+  return !(
+    !question.prompt ||
+    question.prompt.length < minimumPromptLength ||
+    hasBrokenExtractionSymbols(question.prompt) ||
+    hasBrokenExtractionSymbols(answerReference) ||
+    looksLikeSystemNoise(question.prompt) ||
+    blockedGeneratedPromptMatcher.test(normalizeForComparison(question.prompt))
   );
 }
 
-function selectProcedureUnits(units: KnowledgeUnit[], limit: number) {
-  return takeBalancedBySection(
-    units.filter((unit) => unit.category === "procedure").sort((left, right) => right.importance - left.importance),
-    limit,
-  );
+function uniqueQuestions(candidates: Array<GeneratedQuestionCandidate | null>, fallback: string) {
+  const accepted: QuestionDraft[] = [];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    const answerReference =
+      candidate.question.correctAnswer ?? candidate.question.referenceAnswer ?? candidate.unit.expectedAnswer;
+
+    if (!isValidQuestionDraft(candidate.question, answerReference)) {
+      continue;
+    }
+
+    if (accepted.some((question) => areQuestionsTooSimilar(question, candidate.question))) {
+      continue;
+    }
+
+    accepted.push(candidate.question);
+  }
+
+  if (accepted.length > 0) {
+    return accepted;
+  }
+
+  return [
+    {
+      type: "SHORT_ANSWER",
+      prompt: "Resuma a ideia principal do material em 2 ou 3 frases.",
+      topic: "Resumo geral",
+      correctAnswer: ensureSentence(fallback),
+      referenceAnswer: ensureSentence(fallback),
+      rubric: "Mencione o tema central, um detalhe importante e a conclusao principal.",
+      explanation: "A resposta ideal mostra que voce entendeu o panorama geral.",
+    } satisfies QuestionDraft,
+  ];
 }
 
-function selectComparisonUnits(units: KnowledgeUnit[], limit: number) {
-  return takeBalancedBySection(
-    units.filter((unit) => unit.category === "comparison").sort((left, right) => right.importance - left.importance),
-    limit,
-  );
+function uniqueStructuredQuestions(questions: QuestionDraft[]) {
+  const accepted: QuestionDraft[] = [];
+
+  for (const question of questions) {
+    const answerReference = question.correctAnswer ?? question.referenceAnswer ?? "";
+    if (!isValidQuestionDraft(question, answerReference)) {
+      continue;
+    }
+
+    if (accepted.some((current) => areQuestionsTooSimilar(current, question))) {
+      continue;
+    }
+
+    accepted.push(question);
+  }
+
+  return accepted;
 }
 
-function selectRiskUnits(units: KnowledgeUnit[], limit: number) {
-  return takeBalancedBySection(
-    units
-      .filter((unit) => unit.category === "risk")
-      .sort((left, right) => {
-        const preferredMatcher = /\b(cobertura de estoque|perda|ruptura|inventario)\b/i;
-        const leftScore = left.importance + (preferredMatcher.test(left.subject) ? 5 : 0);
-        const rightScore = right.importance + (preferredMatcher.test(right.subject) ? 5 : 0);
-        return rightScore - leftScore;
-      }),
-    limit,
-  );
-}
+function buildStructuredQuestionCandidates(questions: ParsedStructuredQuestion[], mode: QuizMode) {
+  const target = getTargetQuestionCount(mode);
+  const selected = takeBalancedStructuredQuestions(questions, Math.max(target, mode === "EXAM" ? 20 : target));
 
-function selectFactUnits(units: KnowledgeUnit[], limit: number) {
-  return takeBalancedBySection(
-    units
-      .filter((unit) => unit.category === "fact")
-      .sort((left, right) => {
-        const preferredMatcher =
-          /\b(sugestao de pedido automatico|cobertura de estoque|saida media|estoque padrao|dias de estoque|posicao de estoque|alerta estoque sem vendas)\b/i;
-        const leftScore = left.importance + (preferredMatcher.test(left.subject) ? 4 : 0);
-        const rightScore = right.importance + (preferredMatcher.test(right.subject) ? 4 : 0);
-        return rightScore - leftScore;
-      }),
-    limit,
-  );
-}
+  if (mode === "FLASHCARDS") {
+    return selected.map(createStructuredFlashcardQuestion);
+  }
 
-function getTargetQuestionCount(mode: QuizMode) {
-  return targetQuestionCounts[mode];
+  if (mode === "EXAM") {
+    return selected.map((question) => createStructuredMultipleChoiceQuestion(question, questions) ?? createStructuredShortAnswerQuestion(question));
+  }
+
+  return selected.map(createStructuredShortAnswerQuestion);
 }
 
 function buildQuestionCandidates(analysis: DocumentAnalysis, mode: QuizMode) {
-  const units = analysis.units;
   const questions: Array<GeneratedQuestionCandidate | null> = [];
+  const directUnits = selectUnitsByKinds(
+    analysis.units,
+    ["definition", "purpose", "rule", "procedure", "formula", "comparison", "list"],
+    18,
+  );
 
   if (mode === "QUICK_REVIEW") {
-    const quickUnits = mergeUniqueUnits([
-      selectDefinitionUnits(units, 6),
-      selectPurposeUnits(units, 4),
-      selectFormulaUnits(units, 3),
-      selectRiskUnits(units, 3),
-      selectFactUnits(units, 4),
-    ]);
-
-    quickUnits.slice(0, 4).forEach((unit) => {
-      questions.push(createMultipleChoiceQuestion(unit, units));
-    });
-    quickUnits.slice(0, 3).forEach((unit, index) => {
-      questions.push(createTrueFalseQuestion(unit, units, index));
-    });
-    quickUnits.slice(0, 5).forEach((unit) => {
-      questions.push(createFillBlankQuestion(unit));
-    });
-    quickUnits.slice(0, 12).forEach((unit) => {
-      questions.push(createShortAnswerQuestion(unit));
-    });
-    quickUnits.slice(0, 6).forEach((unit) => {
-      questions.push(createShortAnswerVariation(unit));
+    const units = selectUnitsByKinds(analysis.units, ["definition", "purpose", "rule", "comparison"], 10);
+    units.forEach((unit) => {
+      questions.push(createShortAnswerQuestion(unit, buildQuickReviewPrompt));
     });
   }
 
   if (mode === "DEEP_DIVE") {
-    const deepChoiceUnits = mergeUniqueUnits([
-      selectDefinitionUnits(units, 5),
-      selectPurposeUnits(units, 4),
-      selectFormulaUnits(units, 3),
-      selectRiskUnits(units, 3),
-    ]);
-    const deepShortUnits = mergeUniqueUnits([
-      selectDefinitionUnits(units, 6),
-      selectPurposeUnits(units, 5),
-      selectFormulaUnits(units, 3),
-      selectProcedureUnits(units, 3),
-      selectComparisonUnits(units, 3),
-      selectRiskUnits(units, 4),
-      selectFactUnits(units, 5),
-    ]);
-
-    deepChoiceUnits.slice(0, 5).forEach((unit) => {
-      questions.push(createMultipleChoiceQuestion(unit, units));
+    directUnits.slice(0, 10).forEach((unit) => {
+      questions.push(createShortAnswerQuestion(unit, buildDirectPrompt));
     });
-
-    deepShortUnits.slice(0, 18).forEach((unit) => {
-      questions.push(createShortAnswerQuestion(unit));
-    });
-    deepShortUnits.slice(0, 10).forEach((unit) => {
-      questions.push(createShortAnswerVariation(unit));
+    directUnits.slice(0, 5).forEach((unit) => {
+      questions.push(createMultipleChoiceQuestion(unit, analysis.units));
     });
   }
 
   if (mode === "EXAM") {
-    const examUnits = mergeUniqueUnits([
-      selectDefinitionUnits(units, 10),
-      selectFormulaUnits(units, 5),
-      selectPurposeUnits(units, 8),
-      selectComparisonUnits(units, 5),
-      selectProcedureUnits(units, 5),
-      selectRiskUnits(units, 5),
-      selectFactUnits(units, 10),
-    ]);
-    const examShortUnits = mergeUniqueUnits([
-      selectDefinitionUnits(units, 8),
-      selectFormulaUnits(units, 3),
-      selectPurposeUnits(units, 6),
-      selectProcedureUnits(units, 5),
-      selectComparisonUnits(units, 4),
-      selectRiskUnits(units, 5),
-      selectFactUnits(units, 10),
-    ]);
-
-    examUnits.slice(0, 6).forEach((unit) => {
-      questions.push(createMultipleChoiceQuestion(unit, units));
+    directUnits.slice(0, 8).forEach((unit) => {
+      questions.push(createMultipleChoiceQuestion(unit, analysis.units));
     });
-
-    examUnits.slice(3, 7).forEach((unit, index) => {
-      questions.push(createTrueFalseQuestion(unit, units, index));
+    directUnits.slice(0, 8).forEach((unit) => {
+      questions.push(createShortAnswerQuestion(unit, buildDirectPrompt));
     });
-
-    examUnits.slice(1, 7).forEach((unit) => {
-      questions.push(createFillBlankQuestion(unit));
-    });
-
-    examShortUnits.slice(0, 10).forEach((unit) => {
-      questions.push(createShortAnswerQuestion(unit));
-    });
-    examUnits.slice(0, 14).forEach((unit) => {
-      questions.push(createShortAnswerQuestion(unit));
-    });
-    examUnits.slice(0, 14).forEach((unit) => {
-      questions.push(createShortAnswerVariation(unit));
-    });
-    examUnits.slice(0, 14).forEach((unit) => {
-      questions.push(createShortAnswerRetentionVariation(unit));
-    });
-    examUnits.slice(0, 10).forEach((unit) => {
-      questions.push(createShortAnswerPracticalVariation(unit));
+    directUnits.slice(0, 6).forEach((unit) => {
+      questions.push(createShortAnswerQuestion(unit, buildQuickReviewPrompt));
     });
   }
 
   if (mode === "FEYNMAN") {
-    const feynmanUnits = mergeUniqueUnits([
-      selectDefinitionUnits(units, 4),
-      selectPurposeUnits(units, 3),
-      selectFormulaUnits(units, 2),
-      selectProcedureUnits(units, 2),
-      selectComparisonUnits(units, 2),
-      selectRiskUnits(units, 3),
-      selectFactUnits(units, 3),
-    ]);
-
-    feynmanUnits.slice(0, 8).forEach((unit) => {
-      questions.push(createShortAnswerQuestion(unit, true));
-    });
-    feynmanUnits.slice(0, 8).forEach((unit) => {
-      questions.push(createFeynmanVariationQuestion(unit));
-    });
-    feynmanUnits.slice(0, 6).forEach((unit) => {
-      questions.push(createShortAnswerVariation(unit));
-    });
-    feynmanUnits.slice(0, 6).forEach((unit) => {
-      questions.push(createShortAnswerRetentionVariation(unit));
-    });
+    selectUnitsByKinds(analysis.units, ["definition", "purpose", "procedure", "comparison", "rule"], 8).forEach(
+      (unit) => {
+        questions.push(createShortAnswerQuestion(unit, buildFeynmanPrompt));
+      },
+    );
   }
 
   if (mode === "FLASHCARDS") {
-    const flashcardUnits = mergeUniqueUnits([
-      selectDefinitionUnits(units, 12),
-      selectFormulaUnits(units, 5),
-      selectPurposeUnits(units, 12),
-      selectProcedureUnits(units, 5),
-      selectComparisonUnits(units, 3),
-      selectRiskUnits(units, 5),
-      selectFactUnits(units, 14),
-    ]);
-
-    flashcardUnits.slice(0, 20).forEach((unit) => {
+    directUnits.slice(0, 20).forEach((unit) => {
       questions.push(createFlashcardQuestion(unit));
-    });
-    flashcardUnits.slice(0, 20).forEach((unit) => {
-      questions.push(createFlashcardVariation(unit));
-    });
-    flashcardUnits.slice(0, 20).forEach((unit) => {
-      questions.push(createFlashcardRetentionVariation(unit));
     });
   }
 
   return questions;
 }
 
+function getTargetQuestionCount(mode: QuizMode) {
+  return targetQuestionCounts[mode];
+}
+
+function getQuizModeTitle(mode: QuizMode) {
+  switch (mode) {
+    case "QUICK_REVIEW":
+      return "Revisao rapida";
+    case "DEEP_DIVE":
+      return "Questionario profundo";
+    case "EXAM":
+      return "Modo prova";
+    case "FEYNMAN":
+      return "Modo Feynman";
+    case "FLASHCARDS":
+      return "Flashcards";
+  }
+}
+
 function finalizeGeneratedQuestions(analysis: DocumentAnalysis, mode: QuizMode) {
+  if (analysis.structuredQuestions.length >= 5) {
+    const questions = uniqueStructuredQuestions(buildStructuredQuestionCandidates(analysis.structuredQuestions, mode));
+    const target = getTargetQuestionCount(mode);
+
+    return {
+      questions: questions.slice(0, target),
+      generationNote:
+        questions.length < target
+          ? `Este material importou ${questions.length} ${questions.length === 1 ? "pergunta util" : "perguntas uteis"} neste modo. Mantivemos somente as perguntas com resposta confiavel do arquivo.`
+          : undefined,
+    };
+  }
+
   const fallback = analysis.sections[0]?.content ?? "";
   const questions = uniqueQuestions(buildQuestionCandidates(analysis, mode), fallback);
   const target = getTargetQuestionCount(mode);
 
   return {
-    questions: questions.slice(0, target).map((question, index) => ({
-      ...question,
-      topic: question.topic || `Tópico ${index + 1}`,
-      choices: question.choices?.slice(0, 4),
-    })),
+    questions: questions.slice(0, target),
     generationNote:
       questions.length < target
-        ? `Este material gerou ${questions.length} ${questions.length === 1 ? "pergunta útil" : "perguntas úteis"} neste modo. Preferimos reduzir a quantidade quando o texto não oferece conteúdo confiável suficiente.`
+        ? `Este material gerou ${questions.length} ${questions.length === 1 ? "pergunta util" : "perguntas uteis"} neste modo. Preferimos reduzir a quantidade quando o texto nao oferece conteudo confiavel suficiente.`
         : undefined,
   };
 }
@@ -3005,9 +1577,9 @@ class MockQuizGenerator implements QuizGenerator {
     return [
       {
         mode: "QUICK_REVIEW",
-        title: "Revisão rápida",
-        tagline: "Perguntas diretas para aquecer a memória",
-        description: "Prioriza definições, finalidades e pontos centrais com resposta rápida.",
+        title: "Revisao rapida",
+        tagline: "Sintese curta para aquecer a memoria",
+        description: "Prioriza explicacoes rapidas e sintese sem repetir o formato direto.",
         questionCount: previews.QUICK_REVIEW.length,
         questionTypes: [...new Set(previews.QUICK_REVIEW.map((question) => question.type))],
         emphasis: analysis.emphasis,
@@ -3015,9 +1587,9 @@ class MockQuizGenerator implements QuizGenerator {
       },
       {
         mode: "DEEP_DIVE",
-        title: "Questionário profundo",
-        tagline: "Mais contexto, mais compreensão",
-        description: "Explora definições, cálculos, comparações, riscos e procedimentos com mais profundidade.",
+        title: "Questionario profundo",
+        tagline: "Conceitos claros e verificacao cuidadosa",
+        description: "Explora definicoes, finalidades, regras e comparacoes com mais contexto.",
         questionCount: previews.DEEP_DIVE.length,
         questionTypes: [...new Set(previews.DEEP_DIVE.map((question) => question.type))],
         emphasis: analysis.emphasis,
@@ -3026,8 +1598,8 @@ class MockQuizGenerator implements QuizGenerator {
       {
         mode: "EXAM",
         title: "Modo prova",
-        tagline: "Concentração total até o fim",
-        description: "Mistura formatos diferentes e guarda o resultado para o encerramento.",
+        tagline: "Mistura objetiva e discursiva",
+        description: "Usa somente questoes validadas, sem preencher a prova com alternativas ruins.",
         questionCount: previews.EXAM.length,
         questionTypes: [...new Set(previews.EXAM.map((question) => question.type))],
         emphasis: analysis.emphasis,
@@ -3036,8 +1608,8 @@ class MockQuizGenerator implements QuizGenerator {
       {
         mode: "FEYNMAN",
         title: "Modo Feynman",
-        tagline: "Explique como se estivesse ensinando",
-        description: "Foca em explicações claras, com referência de apoio depois da resposta.",
+        tagline: "Explique para consolidar",
+        description: "Foca em ensinar a ideia com clareza, como se voce estivesse orientando outra pessoa.",
         questionCount: previews.FEYNMAN.length,
         questionTypes: [...new Set(previews.FEYNMAN.map((question) => question.type))],
         emphasis: analysis.emphasis,
@@ -3046,8 +1618,8 @@ class MockQuizGenerator implements QuizGenerator {
       {
         mode: "FLASHCARDS",
         title: "Flashcards",
-        tagline: "Lembrar, comparar e marcar",
-        description: "Transforma conceitos, fórmulas e finalidades em revisão de frente e verso.",
+        tagline: "Frente curta, verso completo",
+        description: "Mostra o conceito na frente e a resposta esperada completa no verso.",
         questionCount: previews.FLASHCARDS.length,
         questionTypes: [...new Set(previews.FLASHCARDS.map((question) => question.type))],
         emphasis: analysis.emphasis,
@@ -3060,13 +1632,13 @@ class MockQuizGenerator implements QuizGenerator {
     const analysis = analyzeDocument(document);
     const generated = finalizeGeneratedQuestions(analysis, mode);
 
-    const optionTitle =
-      this.generateQuizOptions(document).find((option) => option.mode === mode)?.title ?? "Sessão de estudo";
-
     return {
-      title: `${document.title} - ${optionTitle}`,
+      title: `${document.title} - ${getQuizModeTitle(mode)}`,
       mode,
-      questions: generated.questions,
+      questions: generated.questions.map((question, index) => ({
+        ...question,
+        topic: question.topic || `Topico ${index + 1}`,
+      })),
     };
   }
 }

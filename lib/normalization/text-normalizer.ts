@@ -5,11 +5,13 @@ export interface TextSection {
   content: string;
 }
 
-const mojibakeArtifactMatcher = /(?:Ã.|Â.|â[\u0080-\u00BF]{1,2}|�|ï¿½)/gu;
-const mojibakeRunMatcher = /(?:Ã.|Â.|â[\u0080-\u00BF]{1,2}|ï¿½)+/gu;
+const mojibakeArtifactMatcher = /(?:Ãƒ.|Ã‚.|Ã¢[\u0080-\u00BF]{1,2}|ï¿½|Ã¯Â¿Â½)/gu;
+const mojibakeRunMatcher = /(?:Ãƒ.|Ã‚.|Ã¢[\u0080-\u00BF]{1,2}|Ã¯Â¿Â½)+/gu;
+const invisibleControlMatcher = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g;
+const brokenSymbolMatcher = /[âˆƒâ‰¡ï¿¾]/g;
 
 function normalizeDashes(value: string) {
-  return value.replace(/(?:Ã¢â‚¬â€œ|Ã¢â‚¬â€|â€“|â€”|–|—)/g, "-");
+  return value.replace(/(?:ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“|ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â|Ã¢â‚¬â€œ|Ã¢â‚¬â€|â€“|â€”)/g, "-");
 }
 
 function normalizeBullets(value: string) {
@@ -25,7 +27,7 @@ function countMojibakeArtifacts(value: string) {
 function repairMojibakeRun(value: string) {
   try {
     const repaired = Buffer.from(value, "latin1").toString("utf8").normalize("NFC");
-    return repaired.includes("�") ? value : repaired;
+    return repaired.includes("ï¿½") ? value : repaired;
   } catch {
     return value;
   }
@@ -54,21 +56,38 @@ function repairMojibake(value: string) {
 
 function repairBrokenPortugueseWords(value: string) {
   return value
-    .replace(/\bimport-ncia\b/gi, "importância")
-    .replace(/\bpar-metros\b/gi, "parâmetros")
-    .replace(/\bpar-metro\b/gi, "parâmetro")
-    .replace(/\binforma-los\b/gi, "informá-los");
+    .replace(/\bimport-ncia\b/gi, "import\u00e2ncia")
+    .replace(/\bpar-metros\b/gi, "par\u00e2metros")
+    .replace(/\bpar-metro\b/gi, "par\u00e2metro")
+    .replace(/\binforma-los\b/gi, "inform\u00e1-los");
+}
+
+function fixBrokenWordWrapping(value: string) {
+  return value
+    .replace(/(\p{L})-\n(\p{L})/gu, "$1$2")
+    .replace(/(\p{L})\n(?=\p{Ll})/gu, "$1 ")
+    .replace(/(?<=\p{Ll})\n(\p{Ll})/gu, " $1");
 }
 
 export function cleanExtractedText(value: string) {
-  return repairBrokenPortugueseWords(repairMojibake(normalizeBullets(normalizeDashes(value))))
-    .replace(/\u0000/g, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\t/g, " ")
-    .replace(/(\p{L})-\n(\p{L})/gu, "$1$2")
-    .replace(/[ \u00A0]{2,}/g, " ")
+  const cleaned = fixBrokenWordWrapping(
+    repairBrokenPortugueseWords(repairMojibake(normalizeBullets(normalizeDashes(value))))
+      .replace(invisibleControlMatcher, "")
+      .replace(brokenSymbolMatcher, " ")
+      .replace(/\r\n/g, "\n")
+      .replace(/\t/g, " ")
+      .replace(/[ ]{2,}/g, " ")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+      .normalize("NFC"),
+  );
+
+  return cleaned
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n \n/g, "\n\n")
     .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ ]+\n/g, "\n")
     .trim()
     .normalize("NFC");
 }
@@ -103,6 +122,10 @@ function looksLikeShortSubtitle(line: string, nextLine: string | undefined) {
     return false;
   }
 
+  if (/^\S+\s+(todo|todos|toda|todas)\b/i.test(line)) {
+    return false;
+  }
+
   const words = line.split(/\s+/).filter(Boolean);
   if (words.length < 2 || words.length > 14) {
     return false;
@@ -121,7 +144,7 @@ export function isLikelySectionTitle(line: string, nextLine?: string) {
 export function extractSections(value: string) {
   const lines = getMeaningfulLines(value);
   const sections: TextSection[] = [];
-  let currentTitle = "Visão geral";
+  let currentTitle = "Visao geral";
   let currentLines: string[] = [];
   let sectionIndex = 0;
 
@@ -160,7 +183,7 @@ export function extractSections(value: string) {
     ? sections
     : [
         {
-          title: "Visão geral",
+          title: "Visao geral",
           index: 0,
           lines,
           content: value,

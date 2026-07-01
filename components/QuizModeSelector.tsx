@@ -38,11 +38,9 @@ export function QuizModeSelector({
       <div className="rounded-[2rem] border border-white/70 bg-white/75 p-6 shadow-[0_25px_80px_rgba(15,23,42,0.08)]">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Material pronto</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Modo de estudo</p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">{document.title}</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-              Seu material já foi organizado e agora pode virar uma rodada de estudo do jeito que você preferir.
-            </p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Escolha como voce quer responder este material.</p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="rounded-2xl bg-slate-50 px-4 py-3">
@@ -106,9 +104,7 @@ export function QuizModeSelector({
 
               <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-5">
                 <span className="text-sm font-semibold text-slate-700">{formatQuestionCount(option.questionCount)}</span>
-                <span className="text-sm font-semibold text-slate-900">
-                  {isPending ? "Preparando..." : "Começar"}
-                </span>
+                <span className="text-sm font-semibold text-slate-900">{isPending ? "Preparando..." : "Gerar"}</span>
               </div>
             </button>
           );
