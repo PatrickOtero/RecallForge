@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { generateQuizFromDocument, getMinimumQuestionTarget } from "@/lib/quiz/mock-quiz-generator";
-import { serializeQuizSession, serializeDocument } from "@/lib/serializers";
+import {
+  generateQuizFromDocument,
+  getMinimumQuestionTarget,
+  MINIMUM_STRUCTURED_QUESTION_PAIRS,
+  parseStructuredQuestionnaire,
+} from "@/lib/quiz/mock-quiz-generator";
+import { serializeDocument, serializeQuizSession } from "@/lib/serializers";
 import { serializeChoices } from "@/lib/utils";
 import { isQuizMode } from "@/lib/validation";
 
@@ -13,7 +18,7 @@ export async function POST(request: Request) {
   };
 
   if (!body.documentId || !body.mode || !isQuizMode(body.mode)) {
-    return Response.json({ error: "Não foi possível abrir esse modo de estudo." }, { status: 400 });
+    return Response.json({ error: "Nao foi possivel abrir esse modo de estudo." }, { status: 400 });
   }
 
   const existingDocument = await prisma.document.findUnique({
@@ -21,14 +26,46 @@ export async function POST(request: Request) {
   });
 
   if (!existingDocument) {
-    return Response.json({ error: "Não encontramos esse material." }, { status: 404 });
+    return Response.json({ error: "Nao encontramos esse material." }, { status: 404 });
   }
 
-  const generated = generateQuizFromDocument(serializeDocument(existingDocument), body.mode);
+  const document = serializeDocument(existingDocument);
+  const structuredQuestions = parseStructuredQuestionnaire(document.cleanedText);
+
+  if (structuredQuestions.length === 0) {
+    return Response.json(
+      {
+        error:
+          "Este material nao parece estar em formato de perguntas e respostas. O RecallForge agora trabalha apenas com questionarios prontos. Reestruture o conteudo com perguntas e respostas e tente novamente.",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (structuredQuestions.length < MINIMUM_STRUCTURED_QUESTION_PAIRS) {
+    return Response.json(
+      {
+        error:
+          "Nao encontrei perguntas e respostas suficientes neste material. Envie um arquivo estruturado com perguntas e respostas.",
+      },
+      { status: 400 },
+    );
+  }
+
+  const generated = generateQuizFromDocument(document, body.mode);
+  if (generated.questions.length === 0) {
+    return Response.json(
+      {
+        error: "Nao encontrei perguntas suficientes para esse modo neste questionario. Tente outro modo de estudo.",
+      },
+      { status: 400 },
+    );
+  }
+
   const targetCount = getMinimumQuestionTarget(body.mode);
   const generationNote =
     generated.questions.length < targetCount
-      ? `Este material gerou ${generated.questions.length} ${generated.questions.length === 1 ? "pergunta útil" : "perguntas úteis"} neste modo. Preferimos reduzir a quantidade quando o texto não oferece conteúdo confiável suficiente.`
+      ? `Este questionario oferece ${generated.questions.length} ${generated.questions.length === 1 ? "pergunta util" : "perguntas uteis"} neste modo. Mantivemos apenas o que tinha pares confiaveis no arquivo.`
       : undefined;
 
   const session = await prisma.quizSession.create({

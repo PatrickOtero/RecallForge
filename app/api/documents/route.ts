@@ -2,7 +2,11 @@ import { extractTextFromDocx, extractTextFromPdf, extractTextFromTxt } from "@/l
 import { cleanExtractedText, splitTextIntoChunks } from "@/lib/normalization/text-normalizer";
 import { prisma } from "@/lib/prisma";
 import { serializeDocument } from "@/lib/serializers";
-import { generateQuizOptions } from "@/lib/quiz/mock-quiz-generator";
+import {
+  generateQuizOptions,
+  MINIMUM_STRUCTURED_QUESTION_PAIRS,
+  parseStructuredQuestionnaire,
+} from "@/lib/quiz/mock-quiz-generator";
 import type { DocumentSource } from "@/lib/types";
 import {
   buildExtractionFailureMessage,
@@ -69,11 +73,32 @@ export async function POST(request: Request) {
   }
 
   const cleanedText = cleanExtractedText(rawText);
+  const structuredQuestions = parseStructuredQuestionnaire(cleanedText);
 
-  if (cleanedText.length < MIN_TEXT_LENGTH) {
+  if (cleanedText.length < MIN_TEXT_LENGTH && structuredQuestions.length === 0) {
     return Response.json(
       {
         error: buildExtractionFailureMessage(sourceType),
+      },
+      { status: 400 },
+    );
+  }
+
+  if (structuredQuestions.length === 0) {
+    return Response.json(
+      {
+        error:
+          "Este material nao parece estar em formato de perguntas e respostas. O RecallForge agora trabalha apenas com questionarios prontos. Reestruture o conteudo com perguntas e respostas e tente novamente.",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (structuredQuestions.length < MINIMUM_STRUCTURED_QUESTION_PAIRS) {
+    return Response.json(
+      {
+        error:
+          "Nao encontrei perguntas e respostas suficientes neste material. Envie um arquivo estruturado com perguntas e respostas.",
       },
       { status: 400 },
     );

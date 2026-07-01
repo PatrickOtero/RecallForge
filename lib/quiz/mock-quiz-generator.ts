@@ -38,6 +38,7 @@ interface KnowledgeUnit {
   sectionTitle: string;
   sectionIndex: number;
   importance: number;
+  shortAnswerPrompt?: string;
 }
 
 interface DocumentAnalysis {
@@ -75,6 +76,7 @@ interface WorkingStructuredQuestion {
   sectionTitle: string;
   sectionIndex: number;
   promptStyle: StructuredPromptStyle;
+  explicitPromptPrefix: boolean;
   answerStarted: boolean;
   associationGroup?: string;
 }
@@ -87,9 +89,58 @@ const targetQuestionCounts: Record<QuizMode, number> = {
   FLASHCARDS: 20,
 };
 
+export const MINIMUM_STRUCTURED_QUESTION_PAIRS = 3;
+
+const rawTopicWhitelist = new Set(
+  [
+    "gestao de estoques",
+    "cadeia de abastecimento",
+    "sistematicas de abastecimento",
+    "sistematica 1",
+    "sistematica 10",
+    "sistematica 11",
+    "sistematica 20",
+    "saida media",
+    "cobertura de estoque",
+    "alocacao de gondola",
+    "estoque padrao",
+    "estoque padrao tradicional",
+    "estoque padrao final",
+    "volume de oferta",
+    "percentual de reposicao",
+    "faixas de reposicao",
+    "sugestao de pedido automatico",
+    "pedido extra",
+    "dias de estoque",
+    "recebimento",
+    "recebimento junto a fornecedores externos",
+    "recebimento junto a carga do cd",
+    "armazenamento",
+    "movimentacoes internas",
+    "inventario",
+    "inventarios",
+    "perdas",
+    "perda",
+    "perdas identificadas",
+    "perdas nao identificadas",
+    "perda bruta",
+    "perda liquida",
+    "ruptura",
+    "relatorio dia a dia",
+    "relatorio de produtos nao atendidos",
+    "relatorio de acompanhamento falta x excesso",
+    "gestao de estoque cobertura",
+    "posicao de estoque",
+    "alteracao de pedidos paes industrializados",
+    "alteracao de pedido sistematica 1",
+    "etiqueta de separacao",
+    "ajuste de estoque",
+    "acompanhamento de perdas",
+    "curva abc",
+  ].map((topic) => normalizeForComparison(topic)),
+);
+
 const completeSentenceEndingMatcher = /[.!?]$/;
-const listLikeTitleMatcher = /\b(lista|itens|pontos|cuidados|etapas|passos|checklist)\b/i;
-const procedureLikeTitleMatcher = /\b(procedimento|processo|rotina|fluxo|recebimento|armazenagem|conferencia|inventario)\b/i;
 const truncatedHeadlineMatcher = /^\S+\s+(todo|todos|toda|todas)\b/i;
 const blockedStartMatcher =
   /^(a|ao|aos|as|com|da|das|de|do|dos|e|em|na|nas|no|nos|para|por|sem)\b/i;
@@ -100,18 +151,27 @@ const systemNoiseMatcher =
 const brokenSymbolMatcher = /[âˆƒâ‰¡ï¿¾]/;
 const separatorLineMatcher = /^[-_=]{6,}$/;
 const structuredSectionMatcher =
-  /^(?:bloco|modulo|m[oó]dulo|tema|cap[ií]tulo|sec[aã]o|se[cç][aã]o)\s*\d*\s*[-–—:]?\s+(.+)$/i;
-const structuredAnswerMatcher = /^(?:resposta|resposta esperada|gabarito)\s*[:\-–—]?\s*(.*)$/i;
+  /^(?:\[\s*(.+?)\s*\]|(?:bloco|modulo|m[oó]dulo|tema|cap[ií]tulo|sec[aã]o|se[cç][aã]o)\s*\d*\s*[-–—:]?\s+(.+))$/i;
+const structuredAnswerMatcher = /^(?:resposta|resposta esperada|gabarito|a|r)\s*[:\-–—]?\s*(.*)$/i;
 const structuredQuestionLeadMatcher =
-  /^(?:\d+[\).]\s*)?(?:qual|quais|o que|que|como|quando|onde|por que|porque|quem|explique|cite|defina|associe|relacione|complete|verdadeiro ou falso|flashcards?)\b/i;
+  /^(?:\d+[\).]\s*)?(?:(?:pergunta|q|p)\s*[:\-–—]\s*|qual|quais|o que|que|como|quando|onde|por que|porque|quem|explique|cite|defina|associe|relacione|complete|verdadeiro ou falso|flashcards?)\b/i;
 const structuredAssociationInstructionMatcher =
   /^(?:quest[oõ]es? de associa[cç][aã]o|associe(?: cada item)?(?: [aà] resposta correta)?|associa[cç][aã]o)\b/i;
 const metaInstructionMatcher =
   /^(?:use da seguinte forma|instru[cç][oõ]es? de uso|como usar|tente responder sem olhar|confira o gabarito|refa[cç]a as perguntas erradas|reveja as perguntas erradas)\b/i;
 const blockedGeneratedPromptMatcher =
   /^(?:resuma em uma frase o conceito de (?:qual|quais)\b|explique (?:qual|quais)\b|use da seguinte forma\b)/i;
+const invalidTopicStartMatcher =
+  /^(?:o ajuste deve|sabemos tamb[eé]m|todos os|toda a|use|excel|top|campo de altera[cç][aã]o|ap[oó]s t[eé]rmino)/i;
+const invalidTopicContentMatcher =
+  /(?:c[oó]pia autorizada|excel top 30|campo de altera[cç][aã]o|acesso:|>>|tela de acesso|tela de altera[cç][aã]o)/i;
+const formulaOnlyTopicMatcher = /^[\p{L}\d\s]+(?:[+*/-][\p{L}\d\s]+)+$/u;
+const noisyAnswerMatcher =
+  /(?:c[oó]pia autorizada|acesso:|>>|campo de altera[cç][aã]o|excel top 30|tela de acesso|tela de altera[cç][aã]o)/i;
+const numberedFormulaMatcher = /^(.{3,90}?)\s*[:=-]\s*(.{8,260})$/i;
 const definitionMatchers = [
-  /^(.{3,90}?)\s+(?:e|\u00e9|eh|sao|s\u00e3o|significa|corresponde a|refere-se a|refere se a|consiste em)\s+(.{12,260})$/i,
+  /^([^,;:.!?]{3,90}?)\s+(?:e|\u00e9|eh)\s+((?:a|o|os|as|um|uma)\b.{8,260})$/i,
+  /^([^,;:.!?]{3,90}?)\s+(?:sao|s\u00e3o|significa|corresponde a|refere-se a|refere se a|consiste em)\s+(.{12,260})$/i,
 ];
 const purposeMatchers = [
   /^(.{3,120}?)\s+(?:serve para|permite|visa|ajuda a)\s+(.{12,260})$/i,
@@ -137,10 +197,189 @@ function ensureSentence(value: string) {
   return completeSentenceEndingMatcher.test(cleaned) ? cleaned : `${cleaned}.`;
 }
 
+function sanitizeGeneratedText(text: string) {
+  return text
+    .normalize("NFC")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00ce\u039e|\u00ef\u00bf\u00be|â–ª|ïƒ˜/g, " ")
+    .replace(/\bN\s+O(?=\s+\p{L}{3,})/gu, "N\u00c3O")
+    .replace(/\bpar metros\b/gi, "par\u00e2metros")
+    .replace(/\bsistematica\b/gi, "sistem\u00e1tica")
+    .replace(/\s*={3,}\s*/g, " ")
+    .replace(/\s*[-–—]{3,}\s*/g, " ")
+    .replace(/\bcomo por exemplo:\s*/gi, "como ")
+    .replace(/\s*;\s*/g, "; ")
+    .replace(/\s*,\s*/g, ", ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .trim();
+}
+
+function containsBrokenGeneratedText(text: string) {
+  const normalized = normalizeForComparison(text);
+
+  return (
+    /Îž|ï¿¾|Ãƒ|Ã‚|ï¿½|====/i.test(text) ||
+    /\bN O\b/.test(text) ||
+    /\bpar metros\b/i.test(text) ||
+    /C[oó]pia autorizada|KEVIN SILVA|N[aã]o pode ser distribu[ií]do|Acesso:|>>|Campo de altera[cç][aã]o|Ap[oó]s t[eé]rmino, exportar RMS/i.test(
+      text,
+    ) ||
+    normalized.includes("copia autorizada") ||
+    normalized.includes("kevin silva") ||
+    normalized.includes("nao pode ser distribuido") ||
+    normalized.includes("campo de alteracao")
+  );
+}
+
+function sanitizeGeneratedTextStrict(text: string) {
+  return sanitizeGeneratedText(text)
+    .replace(/\r/g, "\n")
+    .replace(/\u00ce\u017e|\u00ce\u039e|\u00ef\u00bf\u00be|\u00ef\u0083\u0098|\u00e2\u0096\u00aa|â‰¡/g, " ")
+    .replace(/\b(?:copia autorizada|c[oó]pia autorizada)\b[^\n]*/gi, " ")
+    .replace(/\bKEVIN SILVA\b/gi, " ")
+    .replace(/\bN[aã]o pode ser distribu[ií]do\b[^\n]*/gi, " ")
+    .replace(/\bAcesso:\b[^\n]*/gi, " ")
+    .replace(/\bCampo de altera[cç][aã]o\b[^\n]*/gi, " ")
+    .replace(/\bAp[oó]s t[eé]rmino,\s*exportar RMS\b[^\n]*/gi, " ")
+    .replace(/\bExcel Top 30\b[^\n]*/gi, " ")
+    .replace(/\bN\s+O(?=\s+\p{L}{3,})/gu, "NAO")
+    .replace(/\bpar metros\b/gi, "parametros")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function containsBlockedRawArtifact(text: string) {
+  const normalized = normalizeForComparison(text);
+
+  return (
+    /Îž|â‰¡|ï¿¾|Ãƒ|Ã‚|ï¿½|====/i.test(text) ||
+    /\bN O\b/.test(text) ||
+    /\bpar metros\b/i.test(text) ||
+    /C[oó]pia autorizada|KEVIN SILVA|N[aã]o pode ser distribu[ií]do|Acesso:|>>|Campo de altera[cç][aã]o|Ap[oó]s t[eé]rmino, exportar RMS|Excel Top 30/i.test(
+      text,
+    ) ||
+    normalized.includes("copia autorizada") ||
+    normalized.includes("kevin silva") ||
+    normalized.includes("nao pode ser distribuido") ||
+    normalized.includes("campo de alteracao") ||
+    normalized.includes("excel top 30") ||
+    normalized.includes("oferta todos os produtos da carga seca")
+  );
+}
+
+function sanitizePromptText(value: string) {
+  return sanitizeGeneratedTextStrict(value)
+    .replace(/\s+\?/g, "?")
+    .replace(/\s+:/g, ":")
+    .trim();
+}
+
+function sanitizeTopicText(value: string) {
+  return titleCase(trimOuterPunctuation(sanitizeGeneratedTextStrict(value)));
+}
+
+function sanitizeAnswerText(value: string) {
+  return ensureSentence(sanitizeGeneratedTextStrict(value));
+}
+
+function sanitizeQuestionDraft(question: QuestionDraft): QuestionDraft {
+  const sanitizedChoices = question.choices?.map((choice) => ({
+    ...choice,
+    label: sanitizeAnswerText(choice.label),
+  }));
+
+  return {
+    ...question,
+    prompt: sanitizePromptText(question.prompt),
+    topic: sanitizeTopicText(question.topic),
+    correctAnswer: question.correctAnswer ? sanitizeAnswerText(question.correctAnswer) : question.correctAnswer,
+    referenceAnswer: question.referenceAnswer ? sanitizeAnswerText(question.referenceAnswer) : question.referenceAnswer,
+    rubric: question.rubric ? sanitizeAnswerText(question.rubric) : question.rubric,
+    explanation: question.explanation ? sanitizeAnswerText(question.explanation) : question.explanation,
+    choices: sanitizedChoices,
+  } satisfies QuestionDraft;
+}
+
+function isRawMetadataText(value: string) {
+  const cleaned = trimOuterPunctuation(sanitizeGeneratedTextStrict(value));
+  const normalized = normalizeForComparison(cleaned);
+
+  return (
+    !cleaned ||
+    containsBlockedRawArtifact(cleaned) ||
+    looksLikeSystemNoise(cleaned) ||
+    /^manual de /i.test(normalized) ||
+    /^sumario$/i.test(normalized) ||
+    /^indice( pagina)?$/i.test(normalized) ||
+    /^resumo geral$/i.test(normalized) ||
+    /^exemplo pratico$/i.test(normalized) ||
+    /^rio de janeiro(?:,?\s+dezembro de \d{4})?$/i.test(normalized) ||
+    /^\p{L}+\s+de\s+\d{4}$/iu.test(cleaned) ||
+    /\b(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+\d{4}\b/i.test(
+      normalized,
+    ) ||
+    /^[A-Z][a-z]+ de [A-Z][a-z]+(?:, \d{4})?$/.test(cleaned) ||
+    /^\d{1,3}$/.test(cleaned)
+  );
+}
+
+function isBlockedRawLabel(value: string) {
+  const normalized = normalizeForComparison(value);
+  return /^(exemplo pratico|resumo geral|tela de acesso|tela de alteracao|campo de alteracao)$/i.test(normalized);
+}
+
+function classifyKnowledgeUnit(sourceText: string): KnowledgeKind | null {
+  const cleaned = ensureSentence(sanitizeAnswerText(sourceText));
+  const normalized = normalizeForComparison(cleaned);
+
+  if (!cleaned || isRawMetadataText(cleaned)) {
+    return null;
+  }
+
+  if (/\b(diferenca entre|diferenciam)\b/i.test(normalized)) {
+    return "comparison";
+  }
+
+  if (/=/.test(cleaned)) {
+    return "formula";
+  }
+
+  if (/\be uma ferramenta\b/i.test(normalized) && /\bpermite\b/i.test(normalized)) {
+    return "purpose";
+  }
+
+  if (definitionMatchers.some((matcher) => matcher.test(cleaned)) || /^(define-se como|definese como|chamamos de)\b/i.test(normalized)) {
+    return "definition";
+  }
+
+  if (/\b(serve para|permite|auxilia|ajuda a|visa)\b/i.test(normalized)) {
+    return "purpose";
+  }
+
+  if (
+    /\b(nunca devemos|nao deve|não deve|deve|devem)\b/i.test(normalized) ||
+    /^(apos|quanto a|na sistematica|no recebimento|o aep deve)\b/i.test(normalized)
+  ) {
+    return "procedure";
+  }
+
+  if (
+    /\b(temos \w+ tipos|os motivos mais comuns sao|as etapas sao|dentre eles estao|sao:)\b/i.test(normalized) &&
+    /[,;:]|\be\b/i.test(normalized)
+  ) {
+    return "list";
+  }
+
+  return null;
+}
+
 function countWords(value: string) {
   return value.split(/\s+/).filter(Boolean).length;
 }
 
+// Raw-text helpers are intentionally kept isolated while raw generation stays disabled.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function splitIntoSentences(value: string) {
   return value
     .replace(/\n+/g, " ")
@@ -175,6 +414,7 @@ function startsLikeBadFragment(value: string) {
 function hasKnowledgeVerb(value: string) {
   return (
     /\b\p{L}+\s+\u00e9\s+/u.test(value) ||
+    /\b\p{L}+\s+e\s+/u.test(value) ||
     /\b(eh|sao|significa|corresponde|consiste|refere|serve|permite|visa|ajuda|mede|mostra|indica|representa|gera|resulta|afeta|calcula|deve|devem|consegue)\b/i.test(
       normalizeForComparison(value),
     ) ||
@@ -209,6 +449,16 @@ function isCompleteKnowledgeText(value: string, allowVerbLead = false) {
   return uniqueConceptTokens(cleaned).length >= 3;
 }
 
+function isDidacticAnswerText(value: string, allowVerbLead = false) {
+  const cleaned = ensureSentence(value);
+
+  return (
+    isCompleteKnowledgeText(cleaned, allowVerbLead) &&
+    cleaned.length <= 320 &&
+    !noisyAnswerMatcher.test(cleaned)
+  );
+}
+
 function isUsefulTopic(value: string) {
   const topic = trimOuterPunctuation(value);
   const normalized = normalizeForComparison(topic);
@@ -236,6 +486,15 @@ function isUsefulTopic(value: string) {
     return false;
   }
 
+  if (
+    invalidTopicStartMatcher.test(topic) ||
+    invalidTopicContentMatcher.test(topic) ||
+    topic.startsWith("-") ||
+    formulaOnlyTopicMatcher.test(topic)
+  ) {
+    return false;
+  }
+
   if (truncatedHeadlineMatcher.test(topic)) {
     return false;
   }
@@ -244,11 +503,65 @@ function isUsefulTopic(value: string) {
     return false;
   }
 
+  if (/^(introducao|visao geral|resumo geral)$/i.test(normalized)) {
+    return false;
+  }
+
+  if (words.length >= 5 && /\b(e|eh|sao|deve|devem|permite|visa|ajuda|sabemos|pode|mostra)\b/i.test(normalized)) {
+    return false;
+  }
+
+  if (words.length >= 4 && /\b(organiza|gera|grava|cobre|corresponde|significa|permite|indica|resulta)\b/i.test(normalized)) {
+    return false;
+  }
+
   return normalized.length >= 3;
 }
 
+function isBlockedRawTopicStart(normalized: string) {
+  return (
+    /^(o|a|os|as)\b/.test(normalized) ||
+    /^(quanto a|para|com|em|de|da|do|dos|das)\b/.test(normalized) ||
+    /^(sabemos tambem|agora|portanto|todos os|toda a)\b/.test(normalized)
+  );
+}
+
+function hasConjugatedVerb(normalized: string) {
+  return /\b(e|eh|sao|deve|devem|permite|auxilia|ajuda|visa|podem|pode|garante|garantir|gera|resulta|mostra|indica|organiza)\b/.test(
+    normalized,
+  );
+}
+
+function isWhitelistedRawTopic(normalized: string) {
+  return rawTopicWhitelist.has(normalized) || /^sistematica \d+$/.test(normalized);
+}
+
+function buildSectionContextTopic(section: TextSection) {
+  const cleanedTitle = sanitizeTopicText(cleanSectionTitle(section.title));
+  const normalizedTitle = normalizeForComparison(cleanedTitle);
+
+  if (isWhitelistedRawTopic(normalizedTitle)) {
+    return cleanedTitle;
+  }
+
+  const normalizedWithoutPrefix = normalizeForComparison(
+    cleanedTitle.replace(/^(racional da|racional do|conceitos basicos de|relatorios de gestao dos estoques)\s+/i, ""),
+  );
+
+  if (isWhitelistedRawTopic(normalizedWithoutPrefix)) {
+    return titleCase(cleanedTitle.replace(/^(racional da|racional do|conceitos basicos de|relatorios de gestao dos estoques)\s+/i, ""));
+  }
+
+  return null;
+}
+
 function cleanSectionTitle(title: string) {
-  return trimOuterPunctuation(title.replace(/^\d+(\.\d+)*\s*[-:]?\s*/, ""));
+  return trimOuterPunctuation(title.replace(/^\d+(\.\d+)*\s*[-–—.:]?\s*/, ""));
+}
+
+function getPreferredTopicFromSection(section: TextSection) {
+  const cleanedTitle = titleCase(cleanSectionTitle(section.title));
+  return isUsefulTopic(cleanedTitle) ? cleanedTitle : null;
 }
 
 function sanitizeStructuredLine(value: string) {
@@ -263,8 +576,12 @@ function isMetaInstructionLine(value: string) {
   return metaInstructionMatcher.test(normalizeForComparison(value));
 }
 
+function hasExplicitStructuredPromptPrefix(value: string) {
+  return /^(?:pergunta|q|p)\s*[:\-–—]\s*/i.test(value);
+}
+
 function stripStructuredQuestionPrefix(value: string) {
-  return value.replace(/^\d+[\).]\s*/, "").trim();
+  return value.replace(/^(?:\d+[\).]\s*|(?:pergunta|q|p)\s*[:\-–—]\s*)/i, "").trim();
 }
 
 function detectStructuredPromptStyle(value: string): StructuredPromptStyle {
@@ -299,7 +616,7 @@ function getStructuredSectionKind(value: string): StructuredSectionKind {
 
 function normalizeStructuredSectionTitle(value: string) {
   const matched = value.match(structuredSectionMatcher);
-  const raw = trimOuterPunctuation(matched?.[1] ?? value);
+  const raw = trimOuterPunctuation(matched?.[1] ?? matched?.[2] ?? value).replace(/^\[\s*|\s*\]$/g, "");
   if (!raw) {
     return "Questionario importado";
   }
@@ -319,6 +636,10 @@ function parseStructuredAnswerLine(value: string) {
 function isStructuredPromptLine(value: string) {
   if (!value || isSeparatorLine(value) || isMetaInstructionLine(value)) {
     return false;
+  }
+
+  if (hasExplicitStructuredPromptPrefix(value)) {
+    return true;
   }
 
   const prompt = stripStructuredQuestionPrefix(value);
@@ -386,7 +707,11 @@ function finalizeStructuredQuestion(current: WorkingStructuredQuestion | null) {
   const prompt = trimOuterPunctuation(current.promptLines.join(" "));
   const expectedAnswer = joinStructuredAnswerLines(current.answerLines);
   const isAssociation = current.promptStyle === "ASSOCIATION";
-  if (!prompt || !expectedAnswer || (!prompt.endsWith("?") && current.promptStyle === "QUESTION")) {
+  if (
+    !prompt ||
+    !expectedAnswer ||
+    (!prompt.endsWith("?") && current.promptStyle === "QUESTION" && !current.explicitPromptPrefix)
+  ) {
     return null;
   }
 
@@ -486,6 +811,7 @@ export function parseStructuredQuestionnaire(text: string): ParsedStructuredQues
         sectionTitle,
         sectionIndex,
         promptStyle: "ASSOCIATION",
+        explicitPromptPrefix: false,
         answerStarted: false,
         associationGroup: `${sectionIndex}:${normalizeForComparison(sectionTitle)}`,
       };
@@ -500,6 +826,7 @@ export function parseStructuredQuestionnaire(text: string): ParsedStructuredQues
         sectionTitle,
         sectionIndex,
         promptStyle: sectionKind === "ASSOCIATION" ? "ASSOCIATION" : detectStructuredPromptStyle(line),
+        explicitPromptPrefix: hasExplicitStructuredPromptPrefix(line),
         answerStarted: false,
         associationGroup: sectionKind === "ASSOCIATION" ? `${sectionIndex}:${normalizeForComparison(sectionTitle)}` : undefined,
       };
@@ -525,13 +852,13 @@ export function parseStructuredQuestionnaire(text: string): ParsedStructuredQues
 }
 
 export function detectStructuredQuestionnaire(text: string) {
-  return parseStructuredQuestionnaire(text).length >= 5;
+  return parseStructuredQuestionnaire(text).length >= MINIMUM_STRUCTURED_QUESTION_PAIRS;
 }
 
 function buildTopicFallback(section: TextSection, content: string) {
-  const cleanedTitle = cleanSectionTitle(section.title);
-  if (cleanedTitle && cleanedTitle !== "Visao geral" && isUsefulTopic(cleanedTitle)) {
-    return cleanedTitle;
+  const preferredTitle = getPreferredTopicFromSection(section);
+  if (preferredTitle && preferredTitle !== "Visao geral") {
+    return preferredTitle;
   }
 
   const keywords = extractReferenceKeywords(content, 3);
@@ -580,17 +907,29 @@ function createKnowledgeUnit(
   sourceTextInput: string,
   section: TextSection,
   referenceExcerptInput?: string,
-) {
-  const topic = trimOuterPunctuation(topicInput);
-  const expectedAnswer = ensureSentence(expectedAnswerInput);
-  const sourceText = ensureSentence(sourceTextInput);
-  const referenceExcerpt = ensureSentence(referenceExcerptInput ?? sourceTextInput);
+): KnowledgeUnit | null {
+  const topic = sanitizeTopicText(topicInput);
+  const expectedAnswer = sanitizeAnswerText(expectedAnswerInput);
+  const sourceText = sanitizeAnswerText(sourceTextInput);
+  const referenceExcerpt = sanitizeAnswerText(referenceExcerptInput ?? sourceTextInput);
 
   if (
+    isRawMetadataText(topic) ||
+    isRawMetadataText(expectedAnswer) ||
+    isRawMetadataText(sourceText) ||
+    isRawMetadataText(referenceExcerpt) ||
     !isUsefulTopic(topic) ||
-    !isCompleteKnowledgeText(expectedAnswer) ||
-    !isCompleteKnowledgeText(sourceText, kind === "procedure" || kind === "list") ||
-    !isCompleteKnowledgeText(referenceExcerpt, kind === "procedure" || kind === "list")
+    containsBrokenGeneratedText(topic) ||
+    containsBlockedRawArtifact(topic) ||
+    containsBrokenGeneratedText(expectedAnswer) ||
+    containsBlockedRawArtifact(expectedAnswer) ||
+    containsBrokenGeneratedText(sourceText) ||
+    containsBlockedRawArtifact(sourceText) ||
+    containsBrokenGeneratedText(referenceExcerpt) ||
+    containsBlockedRawArtifact(referenceExcerpt) ||
+    !isDidacticAnswerText(expectedAnswer, kind === "procedure" || kind === "list") ||
+    !isDidacticAnswerText(sourceText, kind === "procedure" || kind === "list") ||
+    !isDidacticAnswerText(referenceExcerpt, kind === "procedure" || kind === "list")
   ) {
     return null;
   }
@@ -660,6 +999,227 @@ function buildStructuredUnit(subject: string, predicate: string, sourceText: str
   return null;
 }
 
+function buildKnownProcedurePrompt(sentence: string, section: TextSection) {
+  const sectionTopic = buildSectionContextTopic(section);
+  const normalized = normalizeForComparison(sentence);
+
+  const afterValidationMatch = sentence.match(/^Apos\s+(.{12,120}?),\s+(.{20,220})$/i);
+  if (afterValidationMatch && sectionTopic && /inventari/i.test(normalizeForComparison(sectionTopic))) {
+    return "O que deve acontecer apos a validacao das informacoes de estoque em um inventario?";
+  }
+
+  const systematicMatch = sentence.match(/^(?:Na|No|Em)\s+(Sistematica\s+\d+),\s+(.{20,260})$/i);
+  if (systematicMatch) {
+    const topic = sanitizeTopicText(systematicMatch[1]);
+    if (isValidRawTopic(topic)) {
+      return `Como funciona a ${topic}?`;
+    }
+  }
+
+  const quantityChangeMatch = sentence.match(/^Quanto a\s+carga seca(?:\s+e\s+congelada)?,\s+as lojas podem efetuar alteracao nas quantidades sugeridas(?:\s+ate\s+as\s+([0-9]{1,2}h))?/i);
+  if (quantityChangeMatch) {
+    return "Em qual horario as lojas podem alterar as quantidades sugeridas para carga seca e congelada?";
+  }
+
+  const actorMatch = sentence.match(/^(?:o|a|os|as)\s+([A-Z]{2,6}|[\p{L}]{3,40})\s+deve\b/iu);
+  const actor = actorMatch?.[1]?.toUpperCase();
+
+  if (actor && sectionTopic && isValidRawTopic(sectionTopic)) {
+    if (/^recebimento\b/i.test(normalizeForComparison(sectionTopic))) {
+      return `O que o ${actor} deve fazer no ${sectionTopic.toLowerCase()}?`;
+    }
+
+    return `O que o ${actor} deve fazer em ${sectionTopic.toLowerCase()}?`;
+  }
+
+  const neverAcceptMatch = sentence.match(/nunca (?:devemos|deve)\s+(.{8,120})/i);
+  if (neverAcceptMatch) {
+    return "Que tipo de pedido nunca deve ser aceito?";
+  }
+
+  if (/\bdeverao ser assinadas\b/i.test(normalized) && sectionTopic && /inventari/i.test(normalizeForComparison(sectionTopic))) {
+    return "O que deve acontecer apos a validacao das informacoes de estoque em um inventario?";
+  }
+
+  return null;
+}
+
+function buildKnownListPrompt(sentence: string) {
+  const normalized = normalizeForComparison(sentence);
+  const explicitListMatch =
+    sentence.match(/temos\s+(.{1,20}?)\s+tipos?\s+de\s+(.{3,80}?)(?:[.:]|$)/i) ??
+    sentence.match(/quatro\s+tipos?\s+de\s+(.{3,80}?)(?:[.:]|$)/i);
+
+  if (explicitListMatch) {
+    const quantity = trimOuterPunctuation(explicitListMatch[1] ?? "quatro");
+    const subject = trimOuterPunctuation(explicitListMatch[2] ?? explicitListMatch[1] ?? "");
+    if (subject) {
+      return {
+        topic: titleCase(subject),
+        prompt: `Quais sao os ${quantity.toLowerCase()} tipos de ${subject.toLowerCase()}?`,
+      };
+    }
+  }
+
+  if (/os motivos mais comuns sao/i.test(normalized)) {
+    return {
+      topic: "Motivos mais comuns",
+      prompt: "Quais sao os motivos mais comuns?",
+    };
+  }
+
+  if (/as etapas sao/i.test(normalized)) {
+    return {
+      topic: "Etapas do processo",
+      prompt: "Quais sao as etapas do processo?",
+    };
+  }
+
+  return null;
+}
+
+function extractSafeDefinitionUnit(sentence: string, section: TextSection) {
+  const cleaned = ensureSentence(sentence);
+  const normalized = normalizeForComparison(cleaned);
+
+  if (/^(define-se como|definese como)\b/i.test(normalized) || /^chamamos de\b/i.test(normalized)) {
+    const namedMatch = cleaned.match(/^(?:Chamamos de|Define-se como)\s+(.{3,80}?)\s+(?:o|a)\s+(.{12,220})$/i);
+    if (!namedMatch) {
+      return null;
+    }
+
+    const topic = sanitizeTopicText(namedMatch[1]);
+    if (!isValidRawTopic(topic)) {
+      return null;
+    }
+
+    return createKnowledgeUnit("definition", topic, `${topic} e ${trimOuterPunctuation(namedMatch[2])}`, cleaned, section, cleaned);
+  }
+
+  return extractDefinitionUnit(cleaned, section);
+}
+
+function extractSafePurposeUnit(sentence: string, section: TextSection) {
+  const cleaned = ensureSentence(sentence);
+  const unit = extractPurposeUnit(cleaned, section);
+  if (!unit) {
+    return null;
+  }
+
+  if (isDefinitionStyleAnswer(unit.expectedAnswer, unit.topic)) {
+    unit.kind = "definition";
+  }
+
+  return unit;
+}
+
+function extractSafeFormulaUnit(sentence: string, section: TextSection) {
+  return extractFormulaUnit(ensureSentence(sentence), section);
+}
+
+function extractSafeProcedureUnit(sentence: string, section: TextSection) {
+  const cleaned = ensureSentence(sentence);
+  const prompt = buildKnownProcedurePrompt(cleaned, section);
+  if (!prompt) {
+    return null;
+  }
+
+  const sectionTopic = buildSectionContextTopic(section);
+  const topic = sectionTopic && isValidRawTopic(sectionTopic) ? sectionTopic : null;
+
+  if (!topic) {
+    return null;
+  }
+
+  const unit = createKnowledgeUnit("procedure", topic, cleaned, cleaned, section, cleaned);
+  if (unit) {
+    unit.shortAnswerPrompt = prompt;
+    return unit;
+  }
+
+  const expectedAnswer = sanitizeAnswerText(cleaned);
+  if (
+    isRawMetadataText(expectedAnswer) ||
+    containsBrokenGeneratedText(expectedAnswer) ||
+    containsBlockedRawArtifact(expectedAnswer) ||
+    expectedAnswer.length < 40
+  ) {
+    return null;
+  }
+
+  const keywords = extractReferenceKeywords(`${topic} ${expectedAnswer}`, 6);
+  if (keywords.length < 2) {
+    return null;
+  }
+
+  return {
+    id: `procedure-${normalizeForComparison(topic)}-${normalizeForComparison(expectedAnswer).slice(0, 72)}`,
+    topic,
+    sourceText: expectedAnswer,
+    kind: "procedure",
+    expectedAnswer,
+    referenceExcerpt: expectedAnswer,
+    keywords,
+    sectionTitle: section.title,
+    sectionIndex: section.index,
+    importance: buildImportance("procedure", topic, expectedAnswer, section.title),
+    shortAnswerPrompt: prompt,
+  } satisfies KnowledgeUnit;
+}
+
+function extractSafeListUnit(sentence: string, section: TextSection) {
+  const cleaned = ensureSentence(sentence);
+  const listPrompt = buildKnownListPrompt(cleaned);
+  if (!listPrompt) {
+    return null;
+  }
+
+  const unit = createKnowledgeUnit("list", listPrompt.topic, cleaned, cleaned, section, cleaned);
+  if (!unit) {
+    return null;
+  }
+
+  unit.shortAnswerPrompt = listPrompt.prompt;
+  return unit;
+}
+
+function extractSafeUnitFromSentence(sentence: string, section: TextSection) {
+  const cleaned = ensureSentence(sentence);
+  const classification = classifyKnowledgeUnit(cleaned);
+
+  switch (classification) {
+    case "definition":
+      return extractSafeDefinitionUnit(cleaned, section);
+    case "purpose":
+      return extractSafePurposeUnit(cleaned, section);
+    case "formula":
+      return extractSafeFormulaUnit(cleaned, section);
+    case "procedure":
+      return extractSafeProcedureUnit(cleaned, section);
+    case "list":
+      return extractSafeListUnit(cleaned, section);
+    case "comparison":
+      return extractComparisonUnit(cleaned, section);
+    default:
+      return null;
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function extractSafeUnitFromLine(line: string, section: TextSection) {
+  const cleaned = trimOuterPunctuation(line);
+  if (!cleaned || isRawMetadataText(cleaned)) {
+    return null;
+  }
+
+  const inlineStructured = extractUnitsFromStructuredLine(cleaned, section)[0];
+  if (inlineStructured && classifyKnowledgeUnit(inlineStructured.referenceExcerpt)) {
+    return inlineStructured;
+  }
+
+  return extractSafeUnitFromSentence(cleaned, section);
+}
+
 function extractUnitsFromStructuredLine(line: string, section: TextSection) {
   const cleaned = trimOuterPunctuation(line);
   if (!cleaned || looksLikeSystemNoise(cleaned)) {
@@ -688,7 +1248,11 @@ function extractDefinitionUnit(sentence: string, section: TextSection) {
       continue;
     }
 
-    const subject = trimOuterPunctuation(match[1]);
+    const subject = sanitizeTopicText(match[1]);
+    if (!isValidRawTopic(subject)) {
+      continue;
+    }
+
     const answer = trimOuterPunctuation(match[2]);
     return createKnowledgeUnit("definition", subject, sentence, sentence, section, sentence) ??
       createKnowledgeUnit("definition", subject, `${subject} \u00e9 ${answer}`, sentence, section, sentence);
@@ -704,7 +1268,11 @@ function extractPurposeUnit(sentence: string, section: TextSection) {
       continue;
     }
 
-    const subject = trimOuterPunctuation(match[1]);
+    const subject = sanitizeTopicText(match[1]);
+    if (!isValidRawTopic(subject)) {
+      continue;
+    }
+
     return createKnowledgeUnit("purpose", subject, sentence, sentence, section, sentence);
   }
 
@@ -731,78 +1299,23 @@ function extractComparisonUnit(sentence: string, section: TextSection) {
 }
 
 function extractFormulaUnit(sentence: string, section: TextSection) {
-  if (!/=|\bformula|calculo|indice|percentual\b/i.test(sentence)) {
+  if (!/=|\bformula|calculad|calculo\b/i.test(sentence)) {
     return null;
   }
 
-  const topic = buildTopicFallback(section, sentence);
+  const preferredTopic = buildSectionContextTopic(section);
+  const namedFormula = sentence.match(numberedFormulaMatcher);
+  const candidateTopic = trimOuterPunctuation(namedFormula?.[1] ?? preferredTopic ?? "");
+  const topic = isValidRawTopic(candidateTopic) ? candidateTopic : preferredTopic;
+
+  if (!topic || !isValidRawTopic(topic)) {
+    return null;
+  }
+
   return createKnowledgeUnit("formula", topic, sentence, sentence, section, sentence);
 }
 
-function extractRuleUnit(sentence: string, section: TextSection) {
-  if (!/\bdeve|devem|nunca|sempre|obrigatorio\b/i.test(sentence)) {
-    return null;
-  }
-
-  const topic = buildTopicFallback(section, sentence);
-  return createKnowledgeUnit("rule", topic, sentence, sentence, section, sentence);
-}
-
-function extractUnitsFromSentence(sentence: string, section: TextSection) {
-  const cleaned = ensureSentence(sentence);
-  if (!isCompleteKnowledgeText(cleaned)) {
-    return [];
-  }
-
-  const definitionUnit = extractDefinitionUnit(cleaned, section);
-  if (definitionUnit) {
-    return [definitionUnit];
-  }
-
-  const purposeUnit = extractPurposeUnit(cleaned, section);
-  if (purposeUnit) {
-    return [purposeUnit];
-  }
-
-  const comparisonUnit = extractComparisonUnit(cleaned, section);
-  if (comparisonUnit) {
-    return [comparisonUnit];
-  }
-
-  return [extractFormulaUnit(cleaned, section), extractRuleUnit(cleaned, section)].filter(
-    (unit): unit is KnowledgeUnit => Boolean(unit),
-  );
-}
-
-function extractProcedureOrListUnit(section: TextSection) {
-  const cleanedTitle = cleanSectionTitle(section.title);
-  if (!isUsefulTopic(cleanedTitle)) {
-    return null;
-  }
-
-  const validLines = section.lines
-    .map((line) => trimOuterPunctuation(line))
-    .filter((line) => line.length >= 8)
-    .filter((line) => !looksLikeSystemNoise(line) && !hasBrokenExtractionSymbols(line));
-
-  if (validLines.length < 2 || validLines.length > 6) {
-    return null;
-  }
-
-  const kind: KnowledgeKind = listLikeTitleMatcher.test(cleanedTitle)
-    ? "list"
-    : procedureLikeTitleMatcher.test(cleanedTitle)
-      ? "procedure"
-      : "list";
-
-  const expectedAnswer =
-    kind === "procedure"
-      ? `Os passos principais de ${cleanedTitle.toLowerCase()} sao: ${validLines.join("; ")}.`
-      : `Os pontos principais de ${cleanedTitle.toLowerCase()} sao: ${validLines.join("; ")}.`;
-
-  return createKnowledgeUnit(kind, cleanedTitle, expectedAnswer, expectedAnswer, section, validLines.join("; "));
-}
-
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function dedupeUnits(units: KnowledgeUnit[]) {
   const seen = new Set<string>();
   const deduped: KnowledgeUnit[] = [];
@@ -828,38 +1341,23 @@ function dedupeUnits(units: KnowledgeUnit[]) {
 
 function analyzeDocument(document: Document): DocumentAnalysis {
   const structuredQuestions = parseStructuredQuestionnaire(document.cleanedText);
-  if (structuredQuestions.length >= 5) {
+  const sections = extractSections(document.cleanedText);
+
+  if (structuredQuestions.length >= MINIMUM_STRUCTURED_QUESTION_PAIRS) {
     return {
-      sections: extractSections(document.cleanedText),
+      sections,
       units: [],
       structuredQuestions,
       emphasis: [...new Set(structuredQuestions.map((question) => question.topic))].slice(0, 3),
     };
   }
 
-  const sections = extractSections(document.cleanedText);
-  const units: KnowledgeUnit[] = [];
-
-  for (const section of sections) {
-    const listUnit = extractProcedureOrListUnit(section);
-    if (listUnit) {
-      units.push(listUnit);
-    }
-
-    for (const line of section.lines) {
-      units.push(...extractUnitsFromStructuredLine(line, section));
-    }
-
-    for (const sentence of splitIntoSentences(section.content)) {
-      units.push(...extractUnitsFromSentence(sentence, section));
-    }
-  }
-
+  // Raw-text question generation was intentionally disabled after the product pivot.
   return {
     sections,
-    units: dedupeUnits(units),
+    units: [],
     structuredQuestions: [],
-    emphasis: extractReferenceKeywords(document.cleanedText, 3).map((keyword) => titleCase(keyword)),
+    emphasis: [],
   };
 }
 
@@ -978,55 +1476,107 @@ function buildReferenceExcerpt(unit: KnowledgeUnit) {
   return unit.referenceExcerpt;
 }
 
+function extractRubricHighlights(unit: KnowledgeUnit, limit = 5) {
+  const source = sanitizeAnswerText(unit.referenceExcerpt || unit.expectedAnswer);
+  const acronymMatches = source.match(/\b[A-Z]{2,}(?:\s+[A-Z]{2,})*\b/g) ?? [];
+  const phraseMatches = source.match(/\b(?:nota fiscal|impacto nos clientes|impacto nas vendas|carga seca|carga congelada|volume de oferta|saida media|cobertura de estoque|estoque padrao(?: final| tradicional)?|produtos nao atendidos|falta x excesso)\b/gi) ?? [];
+  const keywordMatches = extractReferenceKeywords(source, limit + 4).filter(
+    (keyword) => !["deve", "caso", "cliente", "direto", "consequentemente"].includes(keyword),
+  );
+
+  const merged = [
+    ...acronymMatches,
+    ...phraseMatches.map((match) => titleCase(match)),
+    ...keywordMatches.map((keyword) => titleCase(keyword)),
+  ]
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return [...new Set(merged)].slice(0, limit);
+}
+
 function buildRubric(unit: KnowledgeUnit, limit = 4) {
-  const keywords = unit.keywords.slice(0, limit);
+  const keywords = extractRubricHighlights(unit, limit).filter(
+    (keyword) => normalizeForComparison(keyword) !== normalizeForComparison(unit.topic),
+  );
+
   if (keywords.length === 0) {
     return "Recupere a ideia central com suas palavras.";
   }
 
-  if (keywords.length === 1) {
-    return `Mencione ${keywords[0]} ao explicar sua resposta.`;
+  return `Pontos que vale mencionar: ${keywords.slice(0, limit).join("; ")}.`;
+}
+
+function isDefinitionStyleAnswer(answer: string, topic: string) {
+  const normalizedAnswer = normalizeForComparison(answer);
+  const normalizedTopic = normalizeForComparison(topic);
+
+  return (
+    normalizedAnswer.startsWith(`${normalizedTopic} e `) ||
+    /^e\s+(?:a|o|um|uma)\b/.test(normalizedAnswer) ||
+    /\b(significa|corresponde a|refere se a|consiste em)\b/.test(normalizedAnswer)
+  );
+}
+
+function isPurposeStyleAnswer(answer: string) {
+  return /\b(serve para|permite|visa|ajuda a|finalidade)\b/.test(normalizeForComparison(answer));
+}
+
+function buildPurposePrompt(unit: KnowledgeUnit) {
+  if (isDefinitionStyleAnswer(unit.expectedAnswer, unit.topic)) {
+    return `O que e ${unit.topic}?`;
   }
 
-  const body = `${keywords.slice(0, -1).join(", ")} e ${keywords[keywords.length - 1]}`;
-  return `Mencione ${body} ao explicar sua resposta.`;
+  if (isPurposeStyleAnswer(unit.expectedAnswer)) {
+    return `Para que serve ${unit.topic}?`;
+  }
+
+  return `Qual e a finalidade de ${unit.topic}?`;
 }
 
 function buildDirectPrompt(unit: KnowledgeUnit) {
+  if (unit.shortAnswerPrompt) {
+    return unit.shortAnswerPrompt;
+  }
+
   switch (unit.kind) {
     case "definition":
       return `O que e ${unit.topic}?`;
     case "purpose":
-      return `Para que serve ${unit.topic}?`;
+      return buildPurposePrompt(unit);
     case "procedure":
-      return `Como funciona ${unit.topic}?`;
+      return `Quais sao os principais procedimentos de ${unit.topic}?`;
     case "rule":
-      return `Qual e a regra principal sobre ${unit.topic}?`;
+      return `Qual regra deve ser observada em ${unit.topic}?`;
     case "formula":
       return `Como e calculado ${unit.topic}?`;
     case "comparison":
       return `Qual e a diferenca entre ${unit.topic}?`;
     case "list":
-      return `Quais sao os pontos principais de ${unit.topic}?`;
+      return `Quais itens compoem ${unit.topic}?`;
   }
 }
 
 function buildQuickReviewPrompt(unit: KnowledgeUnit) {
+  if (unit.shortAnswerPrompt) {
+    return unit.shortAnswerPrompt;
+  }
+
   switch (unit.kind) {
     case "definition":
-      return `Resuma em uma frase o conceito de ${unit.topic}.`;
+      return `O que e ${unit.topic}?`;
     case "purpose":
-      return `Que problema ${unit.topic} ajuda a resolver?`;
+      return buildPurposePrompt(unit);
     case "procedure":
-      return `Explique rapidamente como ${unit.topic} acontece na pratica.`;
+      return `Quais sao os principais procedimentos de ${unit.topic}?`;
     case "rule":
-      return `Que cuidado principal voce deve lembrar sobre ${unit.topic}?`;
+      return `Qual regra deve ser observada em ${unit.topic}?`;
     case "formula":
-      return `O que o calculo de ${unit.topic} mostra?`;
+      return `Como e calculado ${unit.topic}?`;
     case "comparison":
-      return `Resuma a diferenca central em ${unit.topic}.`;
+      return `Qual e a diferenca entre ${unit.topic}?`;
     case "list":
-      return `Cite rapidamente os pontos centrais de ${unit.topic}.`;
+      return `Quais itens compoem ${unit.topic}?`;
   }
 }
 
@@ -1037,19 +1587,19 @@ function buildFeynmanPrompt(unit: KnowledgeUnit) {
 function buildMultipleChoicePrompt(unit: KnowledgeUnit) {
   switch (unit.kind) {
     case "definition":
-      return `Qual alternativa define melhor ${unit.topic}?`;
+      return `Qual alternativa descreve corretamente o conceito de ${unit.topic}?`;
     case "purpose":
-      return `Qual alternativa explica melhor para que serve ${unit.topic}?`;
+      return `Qual alternativa descreve corretamente a finalidade de ${unit.topic}?`;
     case "procedure":
-      return `Qual alternativa descreve corretamente como ${unit.topic} funciona?`;
+      return `Qual alternativa descreve corretamente os procedimentos de ${unit.topic}?`;
     case "rule":
-      return `Qual alternativa resume melhor a regra sobre ${unit.topic}?`;
+      return `Qual alternativa descreve corretamente a regra em ${unit.topic}?`;
     case "formula":
-      return `Qual alternativa descreve corretamente ${unit.topic}?`;
+      return `Qual alternativa descreve corretamente como ${unit.topic} e calculado?`;
     case "comparison":
       return `Qual alternativa diferencia corretamente ${unit.topic}?`;
     case "list":
-      return `Qual alternativa corresponde melhor a ${unit.topic}?`;
+      return `Qual alternativa lista corretamente os itens de ${unit.topic}?`;
   }
 }
 
@@ -1062,7 +1612,17 @@ function buildChoiceId(unit: KnowledgeUnit, index: number) {
 }
 
 function isBadAlternativeText(value: string) {
-  return !isCompleteKnowledgeText(value) || startsLikeBadFragment(value);
+  const cleaned = ensureSentence(value);
+  const normalized = normalizeForComparison(cleaned);
+  return (
+    !isDidacticAnswerText(cleaned) ||
+    startsLikeBadFragment(cleaned) ||
+    cleaned.length > 220 ||
+    invalidTopicContentMatcher.test(cleaned) ||
+    /^[a-z]/.test(cleaned) ||
+    /^(garantindo|efetuando|realizando|validando|apos)\b/i.test(normalized) ||
+    /^.{0,25}\b(e|ou|mas)\b\s+[a-z]/.test(cleaned)
+  );
 }
 
 function hasComparableLength(left: string, right: string) {
@@ -1078,9 +1638,14 @@ function hasComparableLength(left: string, right: string) {
 }
 
 function buildDistractorPool(unit: KnowledgeUnit, units: KnowledgeUnit[]) {
+  if (!["definition", "purpose", "formula"].includes(unit.kind)) {
+    return [];
+  }
+
   return units
     .filter((candidate) => candidate.id !== unit.id)
-    .filter((candidate) => candidate.kind === unit.kind || conceptSimilarity(candidate.topic, unit.topic) >= 0.2)
+    .filter((candidate) => candidate.kind === unit.kind)
+    .filter((candidate) => Math.abs(candidate.sectionIndex - unit.sectionIndex) <= 2)
     .filter((candidate) => !isBadAlternativeText(candidate.expectedAnswer))
     .filter((candidate) => normalizeForComparison(candidate.expectedAnswer) !== normalizeForComparison(unit.expectedAnswer))
     .filter((candidate) => conceptSimilarity(candidate.expectedAnswer, unit.expectedAnswer) < 0.72)
@@ -1149,6 +1714,7 @@ function createMultipleChoiceQuestion(unit: KnowledgeUnit, units: KnowledgeUnit[
   const selected = distractors.slice(0, 3);
 
   if (selected.length < 3) {
+    console.warn(`[quiz-generator] discarded bad multiple choice options: ${unit.topic}`);
     return null;
   }
 
@@ -1164,6 +1730,7 @@ function createMultipleChoiceQuestion(unit: KnowledgeUnit, units: KnowledgeUnit[
   );
 
   if (!validateMultipleChoiceChoices(unit.expectedAnswer, choices)) {
+    console.warn(`[quiz-generator] discarded bad multiple choice options: ${unit.topic}`);
     return null;
   }
 
@@ -1266,6 +1833,8 @@ function isSafeStructuredAlternative(value: string) {
   const cleaned = trimOuterPunctuation(value);
   return (
     cleaned.length >= 6 &&
+    !/^(?:p|r|pergunta|resposta|resposta esperada|gabarito)\s*[:\-]/i.test(cleaned) &&
+    !cleaned.endsWith("?") &&
     !looksLikeSystemNoise(cleaned) &&
     !hasBrokenExtractionSymbols(cleaned) &&
     !isMetaInstructionLine(cleaned)
@@ -1280,15 +1849,7 @@ function buildStructuredDistractorPool(
   question: ParsedStructuredQuestion,
   questions: ParsedStructuredQuestion[],
 ) {
-  const sameAssociationGroup = questions.filter(
-    (candidate) =>
-      question.promptStyle === "ASSOCIATION" &&
-      candidate.associationGroup &&
-      candidate.associationGroup === question.associationGroup,
-  );
-
-  const source = sameAssociationGroup.length >= 4 ? sameAssociationGroup : questions;
-  return source
+  return questions
     .filter((candidate) => candidate.prompt !== question.prompt)
     .filter(
       (candidate) =>
@@ -1299,9 +1860,19 @@ function buildStructuredDistractorPool(
     .filter((candidate) => hasLooselyComparableLength(candidate.expectedAnswer, question.expectedAnswer))
     .sort((left, right) => {
       const leftScore =
+        (question.promptStyle === "ASSOCIATION" &&
+        left.associationGroup &&
+        left.associationGroup === question.associationGroup
+          ? 2
+          : 0) +
         (left.sectionIndex === question.sectionIndex ? 1 : 0) +
         conceptSimilarity(`${left.topic} ${left.prompt}`, `${question.topic} ${question.prompt}`);
       const rightScore =
+        (question.promptStyle === "ASSOCIATION" &&
+        right.associationGroup &&
+        right.associationGroup === question.associationGroup
+          ? 2
+          : 0) +
         (right.sectionIndex === question.sectionIndex ? 1 : 0) +
         conceptSimilarity(`${right.topic} ${right.prompt}`, `${question.topic} ${question.prompt}`);
       return rightScore - leftScore;
@@ -1342,6 +1913,14 @@ function createStructuredMultipleChoiceQuestion(
   question: ParsedStructuredQuestion,
   questions: ParsedStructuredQuestion[],
 ) {
+  if (
+    !question.prompt ||
+    /^(?:qual alternativa define melhor p:|qual alternativa resume melhor a regra sobre r:)/i.test(question.prompt) ||
+    /(?:^|[\s(])(p|r)\s*:/i.test(question.prompt)
+  ) {
+    return null;
+  }
+
   const selected = buildStructuredDistractorPool(question, questions).slice(0, 3);
   if (selected.length < 3) {
     return null;
@@ -1379,19 +1958,311 @@ function areQuestionsTooSimilar(left: QuestionDraft, right: QuestionDraft) {
   );
 }
 
-function isValidQuestionDraft(question: QuestionDraft, answerReference: string) {
-  const minimumPromptLength = question.type === "FLASHCARD" ? 3 : 10;
-  return !(
-    !question.prompt ||
-    question.prompt.length < minimumPromptLength ||
-    hasBrokenExtractionSymbols(question.prompt) ||
-    hasBrokenExtractionSymbols(answerReference) ||
-    looksLikeSystemNoise(question.prompt) ||
-    blockedGeneratedPromptMatcher.test(normalizeForComparison(question.prompt))
+function isKnownLongRawTopic(normalizedTopic: string) {
+  return /^(relatorio de produtos nao atendidos|relatorio de falta x excesso|alteracao de pedidos paes industrializados|alteracao de pedido sistematica \d+|gestao de estoque cobertura)$/.test(
+    normalizedTopic,
   );
 }
 
-function uniqueQuestions(candidates: Array<GeneratedQuestionCandidate | null>, fallback: string) {
+function isValidRawTopic(topic: string) {
+  const cleaned = sanitizeTopicText(topic);
+  const normalized = normalizeForComparison(cleaned);
+  const words = normalized.split(/\s+/).filter(Boolean);
+
+  return (
+    isUsefulTopic(cleaned) &&
+    !isRawMetadataText(cleaned) &&
+    !isBlockedRawLabel(cleaned) &&
+    !containsBrokenGeneratedText(cleaned) &&
+    !containsBlockedRawArtifact(cleaned) &&
+    isWhitelistedRawTopic(normalized) &&
+    !isBlockedRawTopicStart(normalized) &&
+    !/^apos\b/i.test(normalized) &&
+    !/^oferta\b/i.test(normalized) &&
+    !/^todos?\s+os\b/i.test(normalized) &&
+    !/^toda\s+a\b/i.test(normalized) &&
+    !/^(categoria|categorias|produto|produtos)\s+que\b/i.test(normalized) &&
+    !/^sabemos tambem\b/i.test(normalized) &&
+    !/^o ajuste deve\b/i.test(normalized) &&
+    !/^quanto a\b/i.test(normalized) &&
+    !/^o impacto\b/i.test(normalized) &&
+    !/^o aep\b/i.test(normalized) &&
+    !/saida media\s*\*\s*cobertura/i.test(normalized) &&
+    !hasConjugatedVerb(normalized) &&
+    !/(?:\b(opcao|menu|botao|tela|campo|exportar|acesso)\b)/.test(normalized) &&
+    !/[,:]/.test(cleaned) &&
+    !/\b(de|da|do|para|com|que)$/.test(normalized) &&
+    (words.length <= 7 || isKnownLongRawTopic(normalized))
+  );
+}
+
+function getAlignmentTopicTokens(topic: string) {
+  return normalizeForComparison(topic)
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter(
+      (token) =>
+        token.length >= 4 &&
+        ![
+          "para",
+          "com",
+          "sem",
+          "sobre",
+          "entre",
+          "item",
+          "itens",
+          "essa",
+          "esse",
+          "esta",
+          "este",
+        ].includes(token),
+    )
+    .filter(
+      (token) =>
+        ![
+          "basico",
+          "basicos",
+          "procedimento",
+          "procedimentos",
+          "principal",
+          "principais",
+          "processo",
+          "processos",
+          "regra",
+          "regras",
+          "rotina",
+          "rotinas",
+          "passo",
+          "passos",
+          "lista",
+          "listas",
+          "item",
+          "itens",
+        ].includes(token),
+    );
+}
+
+function containsSpecificAnswerDetail(answer: string) {
+  return /\b(placa|avarias|mercadoria|impropria|consumo|danificad|gondola|oferta|carga seca|congelad)\b/i.test(
+    normalizeForComparison(answer),
+  );
+}
+
+function isPromptAnswerAligned(prompt: string, expectedAnswer: string, topic: string, kind?: KnowledgeKind) {
+  const normalizedPrompt = normalizeForComparison(prompt);
+  const normalizedAnswer = normalizeForComparison(expectedAnswer);
+  const isMultipleChoicePrompt = /^qual alternativa\b/.test(normalizedPrompt);
+
+  if (/^que problema\b/.test(normalizedPrompt)) {
+    return false;
+  }
+
+  if (kind === "definition") {
+    if (isMultipleChoicePrompt) {
+      return /\bconceito de\b/.test(normalizedPrompt);
+    }
+
+    return /^o que e\b/.test(normalizedPrompt);
+  }
+
+  if (kind === "purpose") {
+    if (isMultipleChoicePrompt) {
+      return /\bfinalidade de\b/.test(normalizedPrompt) || /\bpara que serve\b/.test(normalizedPrompt);
+    }
+
+    if (isDefinitionStyleAnswer(expectedAnswer, topic)) {
+      return /^o que e\b/.test(normalizedPrompt) || /^qual e a finalidade de\b/.test(normalizedPrompt);
+    }
+
+    return /^para que serve\b/.test(normalizedPrompt) || /^qual e a finalidade de\b/.test(normalizedPrompt);
+  }
+
+  if (kind === "formula") {
+    if (isMultipleChoicePrompt) {
+      return /\bcalculad\b/.test(normalizedPrompt);
+    }
+
+    return /\bcalculad|\bcalculo\b/.test(normalizedPrompt);
+  }
+
+  if (kind === "list") {
+    if (isMultipleChoicePrompt) {
+      return /\blista corretamente os itens de\b/.test(normalizedPrompt);
+    }
+
+    if (!/\b(quais itens compoem|quais sao os itens de)\b/i.test(normalizedPrompt)) {
+      return false;
+    }
+  }
+
+  if (kind === "rule") {
+    if (isMultipleChoicePrompt) {
+      return /\bregra em\b/.test(normalizedPrompt);
+    }
+
+    if (!/\bqual regra deve ser observada\b/i.test(normalizedPrompt)) {
+      return false;
+    }
+  }
+
+  if (kind === "procedure" && isMultipleChoicePrompt) {
+    return /\bprocedimentos de\b/.test(normalizedPrompt);
+  }
+
+  if (kind === "comparison" && isMultipleChoicePrompt) {
+    return /\bdiferencia corretamente\b/.test(normalizedPrompt);
+  }
+
+  if (
+    /^como funciona a sistematica\b/.test(normalizedPrompt) ||
+    /^o que o aep deve fazer\b/.test(normalizedPrompt) ||
+    /^o que deve acontecer apos a validacao\b/.test(normalizedPrompt) ||
+    /^em qual horario as lojas podem alterar\b/.test(normalizedPrompt)
+  ) {
+    return true;
+  }
+
+  if (kind === "rule" || kind === "procedure" || kind === "list") {
+    const tokens = getAlignmentTopicTokens(topic);
+    if (tokens.length > 0 && !tokens.some((token) => normalizedAnswer.includes(token))) {
+      return false;
+    }
+  }
+
+  if (containsSpecificAnswerDetail(expectedAnswer)) {
+    const detailTokens = ["placa", "avarias", "mercadoria", "impropria", "consumo", "gondola", "oferta"];
+    if (!detailTokens.some((token) => normalizedPrompt.includes(token))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function getQuestionDraftRejectionReason(
+  question: QuestionDraft,
+  answerReference: string,
+  options?: { enforceAlignment?: boolean; structured?: boolean; kind?: KnowledgeKind },
+) {
+  const minimumPromptLength = question.type === "FLASHCARD" ? 3 : 10;
+  const normalizedPrompt = normalizeForComparison(question.prompt);
+  const normalizedAnswer = normalizeForComparison(answerReference);
+
+  if (!question.prompt || question.prompt.length < minimumPromptLength) {
+    return "prompt curto demais";
+  }
+
+  if (hasBrokenExtractionSymbols(question.prompt) || hasBrokenExtractionSymbols(answerReference)) {
+    return "simbolos quebrados";
+  }
+
+  if (
+    containsBrokenGeneratedText(question.prompt) ||
+    containsBrokenGeneratedText(question.topic) ||
+    containsBrokenGeneratedText(answerReference) ||
+    question.choices?.some((choice) => containsBrokenGeneratedText(choice.label))
+  ) {
+    return "artefatos quebrados";
+  }
+
+  if (looksLikeSystemNoise(question.prompt) || blockedGeneratedPromptMatcher.test(normalizedPrompt)) {
+    return "prompt com ruido";
+  }
+
+  if (
+    invalidTopicContentMatcher.test(question.prompt) ||
+    (!options?.structured &&
+      (
+        /^o que e (o|a|os|as|quanto|exemplo|resumo)\b/i.test(normalizedPrompt) ||
+        /^resuma em uma frase o conceito de\b/i.test(normalizedPrompt) ||
+        /^que problema\b/i.test(normalizedPrompt) ||
+        /^qual alternativa corresponde melhor a\b/i.test(normalizedPrompt) ||
+        /^qual alternativa define melhor\b/i.test(normalizedPrompt) ||
+        /^qual alternativa resume melhor a regra sobre\b/i.test(normalizedPrompt) ||
+        /qual alternativa (?:corresponde|descreve) melhor a [\p{L}\d\s*+/-]+$/iu.test(normalizedPrompt) ||
+        formulaOnlyTopicMatcher.test(question.prompt)
+      ))
+  ) {
+    return "prompt invalido";
+  }
+
+  if (!options?.structured) {
+    if (isRawMetadataText(answerReference)) {
+      return "resposta com metadado";
+    }
+
+    if (
+      options?.kind !== "formula" &&
+      question.type !== "FLASHCARD" &&
+      answerReference.length < 40
+    ) {
+      return "resposta curta demais";
+    }
+
+    if (
+      /^rio de janeiro\b/i.test(normalizedAnswer) ||
+      /\bdezembro de \d{4}\b/i.test(normalizedAnswer) ||
+      /^manual de /i.test(normalizedAnswer)
+    ) {
+      return "resposta com metadado";
+    }
+  }
+
+  if (!options?.structured && !isValidRawTopic(question.topic)) {
+    return "topico invalido";
+  }
+
+  if (question.type === "MULTIPLE_CHOICE" && question.choices) {
+    const isValidChoices = options?.structured
+      ? Boolean(question.correctAnswer) && validateStructuredMultipleChoiceChoices(question.correctAnswer!, question.choices)
+      : Boolean(question.correctAnswer) && validateMultipleChoiceChoices(question.correctAnswer!, question.choices);
+
+    if (!isValidChoices) {
+      return "alternativas inconsistentes";
+    }
+  }
+
+  if (options?.enforceAlignment && !isPromptAnswerAligned(question.prompt, answerReference, question.topic, options.kind)) {
+    return "prompt e resposta desalinhados";
+  }
+
+  return null;
+}
+
+function validateGeneratedQuestion(
+  question: QuestionDraft,
+  answerReference: string,
+  options?: { enforceAlignment?: boolean; structured?: boolean; kind?: KnowledgeKind },
+) {
+  return getQuestionDraftRejectionReason(question, answerReference, options) === null;
+}
+
+function logDiscardedQuestion(reason: string, question: QuestionDraft) {
+  if (reason === "topico invalido") {
+    console.warn(`[quiz-generator] discarded invalid topic: ${question.topic}`);
+    return;
+  }
+
+  if (reason === "artefatos quebrados" || reason === "simbolos quebrados" || reason === "prompt com ruido") {
+    console.warn(`[quiz-generator] discarded noisy text: ${question.prompt}`);
+    return;
+  }
+
+  if (reason === "prompt e resposta desalinhados") {
+    console.warn(`[quiz-generator] discarded misaligned prompt: ${question.prompt}`);
+    return;
+  }
+
+  if (reason === "alternativas inconsistentes") {
+    console.warn(`[quiz-generator] discarded bad multiple choice options: ${question.prompt}`);
+    return;
+  }
+
+  console.warn(`[quiz-generator] discarded question (${reason}): ${question.prompt}`);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function uniqueQuestions(candidates: Array<GeneratedQuestionCandidate | null>) {
   const accepted: QuestionDraft[] = [];
 
   for (const candidate of candidates) {
@@ -1399,51 +2270,56 @@ function uniqueQuestions(candidates: Array<GeneratedQuestionCandidate | null>, f
       continue;
     }
 
-    const answerReference =
-      candidate.question.correctAnswer ?? candidate.question.referenceAnswer ?? candidate.unit.expectedAnswer;
+    const sanitizedQuestion = sanitizeQuestionDraft(candidate.question);
+    const sanitizedAnswerReference =
+      sanitizedQuestion.correctAnswer ?? sanitizedQuestion.referenceAnswer ?? sanitizeAnswerText(candidate.unit.expectedAnswer);
+    const rejectionReason = getQuestionDraftRejectionReason(sanitizedQuestion, sanitizedAnswerReference, {
+      enforceAlignment: sanitizedQuestion.type !== "FLASHCARD",
+      kind: candidate.unit.kind,
+    });
 
-    if (!isValidQuestionDraft(candidate.question, answerReference)) {
+    if (!validateGeneratedQuestion(sanitizedQuestion, sanitizedAnswerReference, {
+      enforceAlignment: sanitizedQuestion.type !== "FLASHCARD",
+      kind: candidate.unit.kind,
+    }) && rejectionReason) {
+      logDiscardedQuestion(rejectionReason, sanitizedQuestion);
       continue;
     }
 
-    if (accepted.some((question) => areQuestionsTooSimilar(question, candidate.question))) {
+    if (accepted.some((question) => areQuestionsTooSimilar(question, sanitizedQuestion))) {
+      logDiscardedQuestion("duplicada ou muito parecida", sanitizedQuestion);
       continue;
     }
 
-    accepted.push(candidate.question);
+    accepted.push(sanitizedQuestion);
   }
 
   if (accepted.length > 0) {
     return accepted;
   }
 
-  return [
-    {
-      type: "SHORT_ANSWER",
-      prompt: "Resuma a ideia principal do material em 2 ou 3 frases.",
-      topic: "Resumo geral",
-      correctAnswer: ensureSentence(fallback),
-      referenceAnswer: ensureSentence(fallback),
-      rubric: "Mencione o tema central, um detalhe importante e a conclusao principal.",
-      explanation: "A resposta ideal mostra que voce entendeu o panorama geral.",
-    } satisfies QuestionDraft,
-  ];
+  return [];
 }
 
 function uniqueStructuredQuestions(questions: QuestionDraft[]) {
   const accepted: QuestionDraft[] = [];
 
   for (const question of questions) {
-    const answerReference = question.correctAnswer ?? question.referenceAnswer ?? "";
-    if (!isValidQuestionDraft(question, answerReference)) {
+    const sanitizedQuestion = sanitizeQuestionDraft(question);
+    const answerReference = sanitizedQuestion.correctAnswer ?? sanitizedQuestion.referenceAnswer ?? "";
+    const rejectionReason = getQuestionDraftRejectionReason(sanitizedQuestion, answerReference, { structured: true });
+
+    if (!validateGeneratedQuestion(sanitizedQuestion, answerReference, { structured: true }) && rejectionReason) {
+      logDiscardedQuestion(rejectionReason, sanitizedQuestion);
       continue;
     }
 
-    if (accepted.some((current) => areQuestionsTooSimilar(current, question))) {
+    if (accepted.some((current) => areQuestionsTooSimilar(current, sanitizedQuestion))) {
+      logDiscardedQuestion("duplicada ou muito parecida", sanitizedQuestion);
       continue;
     }
 
-    accepted.push(question);
+    accepted.push(sanitizedQuestion);
   }
 
   return accepted;
@@ -1464,6 +2340,7 @@ function buildStructuredQuestionCandidates(questions: ParsedStructuredQuestion[]
   return selected.map(createStructuredShortAnswerQuestion);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function buildQuestionCandidates(analysis: DocumentAnalysis, mode: QuizMode) {
   const questions: Array<GeneratedQuestionCandidate | null> = [];
   const directUnits = selectUnitsByKinds(
@@ -1473,7 +2350,7 @@ function buildQuestionCandidates(analysis: DocumentAnalysis, mode: QuizMode) {
   );
 
   if (mode === "QUICK_REVIEW") {
-    const units = selectUnitsByKinds(analysis.units, ["definition", "purpose", "rule", "comparison"], 10);
+    const units = selectUnitsByKinds(analysis.units, ["definition", "purpose", "formula", "procedure", "list", "comparison"], 10);
     units.forEach((unit) => {
       questions.push(createShortAnswerQuestion(unit, buildQuickReviewPrompt));
     });
@@ -1537,7 +2414,7 @@ function getQuizModeTitle(mode: QuizMode) {
 }
 
 function finalizeGeneratedQuestions(analysis: DocumentAnalysis, mode: QuizMode) {
-  if (analysis.structuredQuestions.length >= 5) {
+  if (analysis.structuredQuestions.length >= MINIMUM_STRUCTURED_QUESTION_PAIRS) {
     const questions = uniqueStructuredQuestions(buildStructuredQuestionCandidates(analysis.structuredQuestions, mode));
     const target = getTargetQuestionCount(mode);
 
@@ -1550,16 +2427,9 @@ function finalizeGeneratedQuestions(analysis: DocumentAnalysis, mode: QuizMode) 
     };
   }
 
-  const fallback = analysis.sections[0]?.content ?? "";
-  const questions = uniqueQuestions(buildQuestionCandidates(analysis, mode), fallback);
-  const target = getTargetQuestionCount(mode);
-
   return {
-    questions: questions.slice(0, target),
-    generationNote:
-      questions.length < target
-        ? `Este material gerou ${questions.length} ${questions.length === 1 ? "pergunta util" : "perguntas uteis"} neste modo. Preferimos reduzir a quantidade quando o texto nao oferece conteudo confiavel suficiente.`
-        : undefined,
+    questions: [],
+    generationNote: undefined,
   };
 }
 
@@ -1574,7 +2444,7 @@ class MockQuizGenerator implements QuizGenerator {
       FLASHCARDS: finalizeGeneratedQuestions(analysis, "FLASHCARDS").questions,
     };
 
-    return [
+    const options: QuizModeOption[] = [
       {
         mode: "QUICK_REVIEW",
         title: "Revisao rapida",
@@ -1626,6 +2496,8 @@ class MockQuizGenerator implements QuizGenerator {
         immediateFeedback: true,
       },
     ];
+
+    return options.filter((option) => option.questionCount > 0);
   }
 
   generateQuizFromDocument(document: Document, mode: QuizMode): GeneratedQuiz {
@@ -1656,3 +2528,9 @@ export function generateQuizFromDocument(document: Document, mode: QuizMode) {
 export function getMinimumQuestionTarget(mode: QuizMode) {
   return getTargetQuestionCount(mode);
 }
+
+
+
+
+
+

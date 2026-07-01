@@ -40,7 +40,7 @@ export function QuizModeSelector({
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Modo de estudo</p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">{document.title}</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Escolha como voce quer responder este material.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Escolha como voce quer estudar este questionario.</p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="rounded-2xl bg-slate-50 px-4 py-3">
@@ -104,7 +104,7 @@ export function QuizModeSelector({
 
               <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-5">
                 <span className="text-sm font-semibold text-slate-700">{formatQuestionCount(option.questionCount)}</span>
-                <span className="text-sm font-semibold text-slate-900">{isPending ? "Preparando..." : "Gerar"}</span>
+                <span className="text-sm font-semibold text-slate-900">{isPending ? "Preparando..." : "Iniciar"}</span>
               </div>
             </button>
           );
@@ -116,7 +116,7 @@ export function QuizModeSelector({
         onClick={onBack}
         className="rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
       >
-        Trocar material
+        Voltar ao inicio
       </button>
     </div>
   );

@@ -105,7 +105,7 @@ export function StudyWorkspace() {
       <div className="rounded-[2rem] border border-white/70 bg-white/70 px-6 py-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">RecallForge</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Envie um material, escolha o modo de estudo e gere uma rodada de perguntas.
+          Transforme um questionario pronto em estudo interativo, sem tentar inventar perguntas novas.
         </p>
       </div>
 

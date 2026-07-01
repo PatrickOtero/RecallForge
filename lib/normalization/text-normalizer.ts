@@ -5,13 +5,25 @@ export interface TextSection {
   content: string;
 }
 
-const mojibakeArtifactMatcher = /(?:Ãƒ.|Ã‚.|Ã¢[\u0080-\u00BF]{1,2}|ï¿½|Ã¯Â¿Â½)/gu;
-const mojibakeRunMatcher = /(?:Ãƒ.|Ã‚.|Ã¢[\u0080-\u00BF]{1,2}|Ã¯Â¿Â½)+/gu;
+const mojibakeArtifactMatcher = /(?:ÃƒÆ’.|Ãƒâ€š.|ÃƒÂ¢[\u0080-\u00BF]{1,2}|Ã¯Â¿Â½|ÃƒÂ¯Ã‚Â¿Ã‚Â½)/gu;
+const mojibakeRunMatcher = /(?:ÃƒÆ’.|Ãƒâ€š.|ÃƒÂ¢[\u0080-\u00BF]{1,2}|ÃƒÂ¯Ã‚Â¿Ã‚Â½)+/gu;
 const invisibleControlMatcher = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g;
-const brokenSymbolMatcher = /[âˆƒâ‰¡ï¿¾]/g;
+const brokenSymbolMatcher = /[Ã¢Ë†Æ’Ã¢â€°Â¡Ã¯Â¿Â¾]/g;
+const extractableSectionTitleMatcher = /^\d+(?:\.\d+)*\s*[-–—.]?\s+[A-ZÀ-Ý][^\n]+$/u;
+const removableOperationalLineMatchers = [
+  /^c[oó]pia autorizada para:/i,
+  /^acesso:/i,
+  /^tela de acesso$/i,
+  /^tela de altera[cç][aã]o$/i,
+  /^campo de altera[cç][aã]o$/i,
+  /^ap[oó]s t[eé]rmino,\s*exportar\s+rms$/i,
+  /^selecionar os campos abaixo$/i,
+  /^excel(?:\s+top\s*30)?$/i,
+  /^top\s*30$/i,
+];
 
 function normalizeDashes(value: string) {
-  return value.replace(/(?:ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“|ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â|Ã¢â‚¬â€œ|Ã¢â‚¬â€|â€“|â€”)/g, "-");
+  return value.replace(/(?:ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â|ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“|ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â|Ã¢â‚¬â€œ|Ã¢â‚¬â€)/g, "-");
 }
 
 function normalizeBullets(value: string) {
@@ -27,7 +39,7 @@ function countMojibakeArtifacts(value: string) {
 function repairMojibakeRun(value: string) {
   try {
     const repaired = Buffer.from(value, "latin1").toString("utf8").normalize("NFC");
-    return repaired.includes("ï¿½") ? value : repaired;
+    return repaired.includes("Ã¯Â¿Â½") ? value : repaired;
   } catch {
     return value;
   }
@@ -56,10 +68,10 @@ function repairMojibake(value: string) {
 
 function repairBrokenPortugueseWords(value: string) {
   return value
-    .replace(/\bimport-ncia\b/gi, "import\u00e2ncia")
-    .replace(/\bpar-metros\b/gi, "par\u00e2metros")
-    .replace(/\bpar-metro\b/gi, "par\u00e2metro")
-    .replace(/\binforma-los\b/gi, "inform\u00e1-los");
+    .replace(/\bimport-ncia\b/gi, "importância")
+    .replace(/\bpar-metros\b/gi, "parâmetros")
+    .replace(/\bpar-metro\b/gi, "parâmetro")
+    .replace(/\binforma-los\b/gi, "informá-los");
 }
 
 function fixBrokenWordWrapping(value: string) {
@@ -69,9 +81,59 @@ function fixBrokenWordWrapping(value: string) {
     .replace(/(?<=\p{Ll})\n(\p{Ll})/gu, " $1");
 }
 
+function isDisposableOperationalLine(line: string) {
+  if (!line) {
+    return true;
+  }
+
+  if (
+    /^[-_=]{4,}$/.test(line) ||
+    /^\d{1,3}$/.test(line) ||
+    /^\d+(?:\.\d+)?\s+[-–—]\s+\d+$/.test(line) ||
+    /^[A-ZÀ-Ý][A-Za-zÀ-ÿ\s]+\.{2,}\s*\d+$/.test(line)
+  ) {
+    return true;
+  }
+
+  if (line.includes(">>")) {
+    return true;
+  }
+
+  if (
+    /^manual de procedimentos operacionais$/i.test(line) ||
+    /^manual de gest[aã]o de estoques$/i.test(line) ||
+    /^sum[aá]rio$/i.test(line) ||
+    /^índice(?:\s+p[aá]gina)?$/i.test(line) ||
+    /^indice(?:\s+pagina)?$/i.test(line) ||
+    /^rio de janeiro,\s*[a-zç]+ de \d{4}$/i.test(line)
+  ) {
+    return true;
+  }
+
+  return removableOperationalLineMatchers.some((matcher) => matcher.test(line));
+}
+
+function stripOperationalNoise(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) {
+        return true;
+      }
+
+      if (extractableSectionTitleMatcher.test(line)) {
+        return true;
+      }
+
+      return !isDisposableOperationalLine(line);
+    })
+    .join("\n");
+}
+
 export function cleanExtractedText(value: string) {
   const cleaned = fixBrokenWordWrapping(
-    repairBrokenPortugueseWords(repairMojibake(normalizeBullets(normalizeDashes(value))))
+    stripOperationalNoise(repairBrokenPortugueseWords(repairMojibake(normalizeBullets(normalizeDashes(value)))))
       .replace(invisibleControlMatcher, "")
       .replace(brokenSymbolMatcher, " ")
       .replace(/\r\n/g, "\n")
@@ -100,7 +162,7 @@ export function getMeaningfulLines(value: string) {
 }
 
 function looksLikeNumberedTitle(line: string) {
-  return /^\d+(\.\d+)*\s*[-:]\s+\S+/.test(line) || /^\d+(\.\d+)*\s+\S+/.test(line);
+  return extractableSectionTitleMatcher.test(line);
 }
 
 function looksLikeUppercaseTitle(line: string) {
