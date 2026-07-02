@@ -39,7 +39,7 @@ export async function POST(request: Request) {
 
     const source = inferDocumentSource(fileEntry.name);
     if (!source) {
-      return Response.json({ error: "Tipo de arquivo nao suportado." }, { status: 400 });
+      return Response.json({ error: "Tipo de arquivo não suportado." }, { status: 400 });
     }
 
     sourceType = source;
@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          "Este material nao parece estar em formato de perguntas e respostas. O RecallForge agora trabalha apenas com questionarios prontos. Reestruture o conteudo com perguntas e respostas e tente novamente.",
+          "Este material não parece estar em formato de perguntas e respostas. O RecallForge trabalha com questionários prontos. Reestruture o conteúdo usando P:/R: ou Pergunta:/Resposta: e tente novamente.",
       },
       { status: 400 },
     );
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          "Nao encontrei perguntas e respostas suficientes neste material. Envie um arquivo estruturado com perguntas e respostas.",
+          "Não encontrei perguntas e respostas suficientes neste material. Envie um arquivo estruturado com perguntas e respostas.",
       },
       { status: 400 },
     );

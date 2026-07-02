@@ -53,7 +53,7 @@ export function QuizModeSelector({
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Modo de estudo</p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">{document.title}</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-              Escolha o modo e depois defina como a rodada sera composta.
+              Escolha o modo e depois defina como a rodada será composta.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -142,14 +142,14 @@ export function QuizModeSelector({
         <div className="rounded-[2rem] border border-white/70 bg-white/80 p-6 shadow-[0_25px_80px_rgba(15,23,42,0.08)]">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Composicao</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Composição</p>
               <h3 className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">{selectedOption.title}</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
                 {selectedComposition.description}
               </p>
             </div>
             <div className="rounded-2xl bg-slate-50 px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Previas</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Prévias</p>
               <p className="mt-1 text-sm font-semibold text-slate-700">
                 {formatQuestionCount(selectedComposition.questionCount)}
               </p>
@@ -201,8 +201,8 @@ export function QuizModeSelector({
               {selectedOption.mode === "FEYNMAN"
                 ? "O modo Feynman permanece sempre discursivo."
                 : selectedOption.mode === "FLASHCARDS"
-                  ? "Flashcards mantem o formato fixo de frente e verso."
-                  : `Composicao selecionada: ${getQuizCompositionLabel(selectedComposition.composition)}.`}
+                  ? "Flashcards mantêm o formato fixo de frente e verso."
+                  : `Composição selecionada: ${getQuizCompositionLabel(selectedComposition.composition)}.`}
             </div>
             <button
               type="button"
@@ -221,7 +221,7 @@ export function QuizModeSelector({
         onClick={onBack}
         className="rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
       >
-        Voltar ao inicio
+        Voltar ao início
       </button>
     </div>
   );

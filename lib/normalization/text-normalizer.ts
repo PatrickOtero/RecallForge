@@ -8,7 +8,7 @@ export interface TextSection {
 const mojibakeArtifactMatcher = /(?:ÃƒÆ’.|Ãƒâ€š.|ÃƒÂ¢[\u0080-\u00BF]{1,2}|Ã¯Â¿Â½|ÃƒÂ¯Ã‚Â¿Ã‚Â½)/gu;
 const mojibakeRunMatcher = /(?:ÃƒÆ’.|Ãƒâ€š.|ÃƒÂ¢[\u0080-\u00BF]{1,2}|ÃƒÂ¯Ã‚Â¿Ã‚Â½)+/gu;
 const invisibleControlMatcher = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g;
-const brokenSymbolMatcher = /[Ã¢Ë†Æ’Ã¢â€°Â¡Ã¯Â¿Â¾]/g;
+const brokenSymbolMatcher = /(?:\u00e2\u02c6\u0192|\u00e2\u2030\u00a1|\u00ef\u00bf\u00be)/gu;
 const extractableSectionTitleMatcher = /^\d+(?:\.\d+)*\s*[-–—.]?\s+[A-ZÀ-Ý][^\n]+$/u;
 const removableOperationalLineMatchers = [
   /^c[oó]pia autorizada para:/i,

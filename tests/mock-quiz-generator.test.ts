@@ -74,6 +74,32 @@ test("aceita questionarios estruturados com o minimo recomendado de pares claros
   assert.match(parsed[2]?.expectedAnswer ?? "", /tilacoides/i);
 });
 
+test("remove apenas prefixos explicitos sem cortar letras reais do conteudo", () => {
+  const cleanedText = cleanExtractedText(`
+  [Vinhos]
+
+  P: O que e Riesling?
+  R: Riesling e uma casta branca aromatica.
+
+  P: O que e Roussillon?
+  Resposta: Roussillon e uma regiao do sul da Franca.
+
+  P: O que e ruptura?
+  A: Ruptura e a falta de um produto no momento da compra.
+
+  Pergunta: O que e recebimento?
+  Gabarito: Recebimento e a etapa de conferencia e entrada da mercadoria.
+  `);
+
+  const parsed = parseStructuredQuestionnaire(cleanedText);
+  assert.equal(parsed.length, 4);
+  assert.equal(parsed[0]?.prompt, "O que e Riesling?");
+  assert.equal(parsed[0]?.expectedAnswer, "Riesling e uma casta branca aromatica.");
+  assert.equal(parsed[1]?.expectedAnswer, "Roussillon e uma regiao do sul da Franca.");
+  assert.equal(parsed[2]?.expectedAnswer, "Ruptura e a falta de um produto no momento da compra.");
+  assert.equal(parsed[3]?.expectedAnswer, "Recebimento e a etapa de conferencia e entrada da mercadoria.");
+});
+
 test("trata P/R e secoes em colchetes sem vazar prefixos na multipla escolha", () => {
   const cleanedText = cleanExtractedText(`
   [Roubos, assaltos e salvaguarda de imagens]

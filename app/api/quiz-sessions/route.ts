@@ -19,11 +19,11 @@ export async function POST(request: Request) {
   };
 
   if (!body.documentId || !body.mode || !isQuizMode(body.mode)) {
-    return Response.json({ error: "Nao foi possivel abrir esse modo de estudo." }, { status: 400 });
+    return Response.json({ error: "Não foi possível abrir esse modo de estudo." }, { status: 400 });
   }
 
   if (body.composition && !isQuizComposition(body.composition)) {
-    return Response.json({ error: "Nao foi possivel aplicar essa composicao de questoes." }, { status: 400 });
+    return Response.json({ error: "Não foi possível aplicar essa composição de questões." }, { status: 400 });
   }
 
   const requestedComposition = body.composition && isQuizComposition(body.composition) ? body.composition : undefined;
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   });
 
   if (!existingDocument) {
-    return Response.json({ error: "Nao encontramos esse material." }, { status: 404 });
+    return Response.json({ error: "Não encontramos esse material." }, { status: 404 });
   }
 
   const document = serializeDocument(existingDocument);
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          "Este material nao parece estar em formato de perguntas e respostas. O RecallForge agora trabalha apenas com questionarios prontos. Reestruture o conteudo com perguntas e respostas e tente novamente.",
+          "Este material não parece estar em formato de perguntas e respostas. O RecallForge trabalha com questionários prontos. Reestruture o conteúdo usando P:/R: ou Pergunta:/Resposta: e tente novamente.",
       },
       { status: 400 },
     );
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          "Nao encontrei perguntas e respostas suficientes neste material. Envie um arquivo estruturado com perguntas e respostas.",
+          "Não encontrei perguntas e respostas suficientes neste material. Envie um arquivo estruturado com perguntas e respostas.",
       },
       { status: 400 },
     );
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
   if (generated.questions.length === 0) {
     return Response.json(
       {
-        error: "Nao encontrei perguntas suficientes para esse modo neste questionario. Tente outro modo de estudo.",
+        error: "Não encontrei perguntas suficientes para esse modo neste questionário. Tente outro modo de estudo.",
       },
       { status: 400 },
     );
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
   const targetCount = getMinimumQuestionTarget(body.mode);
   const generationNote =
     generated.questions.length < targetCount
-      ? `Este questionario oferece ${generated.questions.length} ${generated.questions.length === 1 ? "pergunta util" : "perguntas uteis"} neste modo. Mantivemos apenas o que tinha pares confiaveis no arquivo.`
+      ? `Este questionário oferece ${generated.questions.length} ${generated.questions.length === 1 ? "pergunta útil" : "perguntas úteis"} neste modo. Mantivemos apenas o que tinha pares confiáveis no arquivo.`
       : undefined;
 
   const session = await prisma.quizSession.create({

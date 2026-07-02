@@ -77,10 +77,10 @@ function scoreShortAnswer(question: QuestionForEvaluation, responseText: string)
   const feedback =
     score >= 0.7
       ? matchedCoreConcepts.length > 0
-        ? `Boa resposta. Voce recuperou a ideia central: ${matchedCoreConcepts.join(", ")}.`
+        ? `Boa resposta. Você recuperou a ideia central: ${matchedCoreConcepts.join(", ")}.`
         : "Boa resposta. A ideia central apareceu com suas palavras."
       : matchedCoreConcepts.length > 0
-        ? `Boa base. Voce recuperou ${matchedCoreConcepts.join(", ")}. Compare com a resposta esperada para fechar os detalhes.`
+        ? `Boa base. Você recuperou ${matchedCoreConcepts.join(", ")}. Compare com a resposta esperada para fechar os detalhes.`
         : "Vale revisar este ponto e tentar recuperar melhor a ideia central com suas palavras.";
 
   return {
@@ -108,9 +108,9 @@ export function evaluateAnswer(
       score,
       feedback:
         rating === "GOT_IT"
-          ? "Muito bem. Esse ponto parece firme na memoria."
+          ? "Muito bem. Esse ponto parece firme na memória."
           : rating === "ALMOST"
-            ? "Quase la. Compare sua lembranca com a resposta esperada e o trecho de apoio."
+            ? "Quase lá. Compare sua lembrança com a resposta esperada e o trecho de apoio."
             : "Vale revisar a resposta esperada e depois conferir o trecho de apoio.",
     };
   }
@@ -129,8 +129,8 @@ export function evaluateAnswer(
     isCorrect,
     score: isCorrect ? 1 : 0,
     feedback: isCorrect
-      ? "Resposta correta. Voce recuperou bem a ideia principal."
-      : question.explanation ?? "Ainda nao foi dessa vez. Revise a resposta esperada e compare com a ideia principal.",
+      ? "Resposta correta. Você recuperou bem a ideia principal."
+      : question.explanation ?? "Ainda não foi dessa vez. Revise a resposta esperada e compare com a ideia principal.",
   };
 }
 

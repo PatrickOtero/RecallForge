@@ -38,7 +38,7 @@ export function humanizeDocumentTitle(value: string) {
     .replace(/\.[a-z0-9]+$/i, "")
     .replace(/[_-]+/g, " ")
     .replace(/\bpara app\b/gi, "")
-    .replace(/\bmanual de gestao de estoques\b/i, "Manual de Gestao de Estoques")
+    .replace(/\bmanual de gestao de estoques\b/i, "Manual de Gestão de Estoques")
     .replace(/\s{2,}/g, " ")
     .trim();
 
@@ -63,10 +63,10 @@ export function humanizeDocumentTitle(value: string) {
 
 export function getUnsupportedFileMessage(fileName: string) {
   if (/\.doc$/i.test(fileName)) {
-    return "Arquivos .doc antigos ainda nao sao suportados. Converta para .docx ou .txt.";
+    return "Arquivos .doc antigos ainda não são suportados. Converta para .docx ou .txt.";
   }
 
-  return "Esse formato ainda nao e suportado. Use texto colado, .txt, .pdf ou .docx.";
+  return "Esse formato ainda não é suportado. Use texto colado, .txt, .pdf ou .docx.";
 }
 
 export function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
@@ -137,9 +137,9 @@ export function roundScore(value: number) {
 export function getQuizModeLabel(mode: QuizMode) {
   switch (mode) {
     case "QUICK_REVIEW":
-      return "Revisao rapida";
+      return "Revisão rápida";
     case "DEEP_DIVE":
-      return "Questionario profundo";
+      return "Questionário profundo";
     case "EXAM":
       return "Modo prova";
     case "FEYNMAN":
@@ -152,7 +152,7 @@ export function getQuizModeLabel(mode: QuizMode) {
 export function getQuestionTypeLabel(type: QuestionType) {
   switch (type) {
     case "MULTIPLE_CHOICE":
-      return "Multipla escolha";
+      return "Múltipla escolha";
     case "TRUE_FALSE":
       return "Verdadeiro ou falso";
     case "FILL_BLANK":
@@ -175,9 +175,9 @@ export function getQuestionPresentationLabel(type: QuestionType, responseFormat?
 export function getQuizCompositionLabel(composition: QuizComposition) {
   switch (composition) {
     case "AUTO":
-      return "Misto automatico";
+      return "Misto automático";
     case "MULTIPLE_CHOICE_ONLY":
-      return "Apenas multipla escolha";
+      return "Apenas múltipla escolha";
     case "DISCURSIVE_ONLY":
       return "Apenas discursivas";
   }

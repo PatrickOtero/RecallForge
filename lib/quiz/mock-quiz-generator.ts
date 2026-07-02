@@ -93,8 +93,8 @@ const targetQuestionCounts: Record<QuizMode, number> = {
 };
 
 const compositionLabels: Record<QuizComposition, string> = {
-  AUTO: "Misto automatico",
-  MULTIPLE_CHOICE_ONLY: "Apenas multipla escolha",
+  AUTO: "Misto automático",
+  MULTIPLE_CHOICE_ONLY: "Apenas múltipla escolha",
   DISCURSIVE_ONLY: "Apenas discursivas",
 };
 
@@ -157,26 +157,27 @@ const looseVerbStartMatcher =
   /^(verificar|analisar|disponibilizar|acompanhar|controlar|consultar|medir|registrar|alterar|efetuar|informar|exportar)\b/i;
 const systemNoiseMatcher =
   /(^acesso:|>>|breadcrumb|menu|caminho do sistema|campo de alteracao|exportar rms|zsintranet|rms\b)/i;
-const brokenSymbolMatcher = /[âˆƒâ‰¡ï¿¾]/;
+const brokenSymbolMatcher = /(?:\u00e2\u02c6\u0192|\u00e2\u2030\u00a1|\u00ef\u00bf\u00be)/u;
 const separatorLineMatcher = /^[-_=]{6,}$/;
 const structuredSectionMatcher =
-  /^(?:\[\s*(.+?)\s*\]|(?:bloco|modulo|m[oó]dulo|tema|cap[ií]tulo|sec[aã]o|se[cç][aã]o)\s*\d*\s*[-–—:]?\s+(.+))$/i;
-const structuredAnswerMatcher = /^(?:resposta|resposta esperada|gabarito|a|r)\s*[:\-–—]?\s*(.*)$/i;
+  /^(?:\[\s*(.+?)\s*\]|(?:bloco|modulo|m[o?]dulo|tema|cap[i?]tulo|sec[a?]o|se[c?][a?]o)\s*\d*\s*[-??:]?\s+(.+))$/i;
+const structuredAnswerMatcher =
+  /^(?:(?:resposta|resposta esperada|gabarito|answer|a|r)\s*[:\-??]\s*)(.*)$/i;
 const structuredQuestionLeadMatcher =
-  /^(?:\d+[\).]\s*)?(?:(?:pergunta|q|p)\s*[:\-–—]\s*|qual|quais|o que|que|como|quando|onde|por que|porque|quem|explique|cite|defina|associe|relacione|complete|verdadeiro ou falso|flashcards?)\b/i;
+  /^(?:\d+[\).]\s*)?(?:(?:pergunta|q|p)\s*[:\-??]\s*|qual|quais|o que|que|como|quando|onde|por que|porque|quem|explique|cite|defina|associe|relacione|complete|verdadeiro ou falso|flashcards?)\b/i;
 const structuredAssociationInstructionMatcher =
-  /^(?:quest[oõ]es? de associa[cç][aã]o|associe(?: cada item)?(?: [aà] resposta correta)?|associa[cç][aã]o)\b/i;
+  /^(?:quest[o�]es? de associa[c�][a�]o|associe(?: cada item)?(?: [a�] resposta correta)?|associa[c�][a�]o)\b/i;
 const metaInstructionMatcher =
-  /^(?:use da seguinte forma|instru[cç][oõ]es? de uso|como usar|tente responder sem olhar|confira o gabarito|refa[cç]a as perguntas erradas|reveja as perguntas erradas)\b/i;
+  /^(?:use da seguinte forma|instru[c�][o�]es? de uso|como usar|tente responder sem olhar|confira o gabarito|refa[c�]a as perguntas erradas|reveja as perguntas erradas)\b/i;
 const blockedGeneratedPromptMatcher =
   /^(?:resuma em uma frase o conceito de (?:qual|quais)\b|explique (?:qual|quais)\b|use da seguinte forma\b)/i;
 const invalidTopicStartMatcher =
-  /^(?:o ajuste deve|sabemos tamb[eé]m|todos os|toda a|use|excel|top|campo de altera[cç][aã]o|ap[oó]s t[eé]rmino)/i;
+  /^(?:o ajuste deve|sabemos tamb[e�]m|todos os|toda a|use|excel|top|campo de altera[c�][a�]o|ap[o�]s t[e�]rmino)/i;
 const invalidTopicContentMatcher =
-  /(?:c[oó]pia autorizada|excel top 30|campo de altera[cç][aã]o|acesso:|>>|tela de acesso|tela de altera[cç][aã]o)/i;
+  /(?:c[o�]pia autorizada|excel top 30|campo de altera[c�][a�]o|acesso:|>>|tela de acesso|tela de altera[c�][a�]o)/i;
 const formulaOnlyTopicMatcher = /^[\p{L}\d\s]+(?:[+*/-][\p{L}\d\s]+)+$/u;
 const noisyAnswerMatcher =
-  /(?:c[oó]pia autorizada|acesso:|>>|campo de altera[cç][aã]o|excel top 30|tela de acesso|tela de altera[cç][aã]o)/i;
+  /(?:c[o�]pia autorizada|acesso:|>>|campo de altera[c�][a�]o|excel top 30|tela de acesso|tela de altera[c�][a�]o)/i;
 const numberedFormulaMatcher = /^(.{3,90}?)\s*[:=-]\s*(.{8,260})$/i;
 const definitionMatchers = [
   /^([^,;:.!?]{3,90}?)\s+(?:e|\u00e9|eh)\s+((?:a|o|os|as|um|uma)\b.{8,260})$/i,
@@ -210,12 +211,12 @@ function sanitizeGeneratedText(text: string) {
   return text
     .normalize("NFC")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, "")
-    .replace(/\u00ce\u039e|\u00ef\u00bf\u00be|â–ª|ïƒ˜/g, " ")
+    .replace(/\u00ce\u039e|\u00ef\u00bf\u00be|���|���S/g, " ")
     .replace(/\bN\s+O(?=\s+\p{L}{3,})/gu, "N\u00c3O")
     .replace(/\bpar metros\b/gi, "par\u00e2metros")
     .replace(/\bsistematica\b/gi, "sistem\u00e1tica")
     .replace(/\s*={3,}\s*/g, " ")
-    .replace(/\s*[-–—]{3,}\s*/g, " ")
+    .replace(/\s*[-��]{3,}\s*/g, " ")
     .replace(/\bcomo por exemplo:\s*/gi, "como ")
     .replace(/\s*;\s*/g, "; ")
     .replace(/\s*,\s*/g, ", ")
@@ -228,10 +229,10 @@ function containsBrokenGeneratedText(text: string) {
   const normalized = normalizeForComparison(text);
 
   return (
-    /Îž|ï¿¾|Ãƒ|Ã‚|ï¿½|====/i.test(text) ||
+    /�}~|￾|��|��a|�|====/i.test(text) ||
     /\bN O\b/.test(text) ||
     /\bpar metros\b/i.test(text) ||
-    /C[oó]pia autorizada|KEVIN SILVA|N[aã]o pode ser distribu[ií]do|Acesso:|>>|Campo de altera[cç][aã]o|Ap[oó]s t[eé]rmino, exportar RMS/i.test(
+    /C[o�]pia autorizada|KEVIN SILVA|N[a�]o pode ser distribu[i�]do|Acesso:|>>|Campo de altera[c�][a�]o|Ap[o�]s t[e�]rmino, exportar RMS/i.test(
       text,
     ) ||
     normalized.includes("copia autorizada") ||
@@ -244,13 +245,13 @@ function containsBrokenGeneratedText(text: string) {
 function sanitizeGeneratedTextStrict(text: string) {
   return sanitizeGeneratedText(text)
     .replace(/\r/g, "\n")
-    .replace(/\u00ce\u017e|\u00ce\u039e|\u00ef\u00bf\u00be|\u00ef\u0083\u0098|\u00e2\u0096\u00aa|â‰¡/g, " ")
-    .replace(/\b(?:copia autorizada|c[oó]pia autorizada)\b[^\n]*/gi, " ")
+    .replace(/\u00ce\u017e|\u00ce\u039e|\u00ef\u00bf\u00be|\u00ef\u0083\u0098|\u00e2\u0096\u00aa|�0�/g, " ")
+    .replace(/\b(?:copia autorizada|c[o�]pia autorizada)\b[^\n]*/gi, " ")
     .replace(/\bKEVIN SILVA\b/gi, " ")
-    .replace(/\bN[aã]o pode ser distribu[ií]do\b[^\n]*/gi, " ")
+    .replace(/\bN[a�]o pode ser distribu[i�]do\b[^\n]*/gi, " ")
     .replace(/\bAcesso:\b[^\n]*/gi, " ")
-    .replace(/\bCampo de altera[cç][aã]o\b[^\n]*/gi, " ")
-    .replace(/\bAp[oó]s t[eé]rmino,\s*exportar RMS\b[^\n]*/gi, " ")
+    .replace(/\bCampo de altera[c�][a�]o\b[^\n]*/gi, " ")
+    .replace(/\bAp[o�]s t[e�]rmino,\s*exportar RMS\b[^\n]*/gi, " ")
     .replace(/\bExcel Top 30\b[^\n]*/gi, " ")
     .replace(/\bN\s+O(?=\s+\p{L}{3,})/gu, "NAO")
     .replace(/\bpar metros\b/gi, "parametros")
@@ -262,10 +263,10 @@ function containsBlockedRawArtifact(text: string) {
   const normalized = normalizeForComparison(text);
 
   return (
-    /Îž|â‰¡|ï¿¾|Ãƒ|Ã‚|ï¿½|====/i.test(text) ||
+    /�}~|�0�|￾|��|��a|�|====/i.test(text) ||
     /\bN O\b/.test(text) ||
     /\bpar metros\b/i.test(text) ||
-    /C[oó]pia autorizada|KEVIN SILVA|N[aã]o pode ser distribu[ií]do|Acesso:|>>|Campo de altera[cç][aã]o|Ap[oó]s t[eé]rmino, exportar RMS|Excel Top 30/i.test(
+    /C[o�]pia autorizada|KEVIN SILVA|N[a�]o pode ser distribu[i�]do|Acesso:|>>|Campo de altera[c�][a�]o|Ap[o�]s t[e�]rmino, exportar RMS|Excel Top 30/i.test(
       text,
     ) ||
     normalized.includes("copia autorizada") ||
@@ -367,7 +368,7 @@ function classifyKnowledgeUnit(sourceText: string): KnowledgeKind | null {
   }
 
   if (
-    /\b(nunca devemos|nao deve|não deve|deve|devem)\b/i.test(normalized) ||
+    /\b(nunca devemos|nao deve|n�o deve|deve|devem)\b/i.test(normalized) ||
     /^(apos|quanto a|na sistematica|no recebimento|o aep deve)\b/i.test(normalized)
   ) {
     return "procedure";
@@ -565,7 +566,7 @@ function buildSectionContextTopic(section: TextSection) {
 }
 
 function cleanSectionTitle(title: string) {
-  return trimOuterPunctuation(title.replace(/^\d+(\.\d+)*\s*[-–—.:]?\s*/, ""));
+  return trimOuterPunctuation(title.replace(/^\d+(\.\d+)*\s*[-��.:]?\s*/, ""));
 }
 
 function getPreferredTopicFromSection(section: TextSection) {
@@ -586,11 +587,11 @@ function isMetaInstructionLine(value: string) {
 }
 
 function hasExplicitStructuredPromptPrefix(value: string) {
-  return /^(?:pergunta|q|p)\s*[:\-–—]\s*/i.test(value);
+  return /^(?:pergunta|q|p)\s*[:\-��]\s*/i.test(value);
 }
 
 function stripStructuredQuestionPrefix(value: string) {
-  return value.replace(/^(?:\d+[\).]\s*|(?:pergunta|q|p)\s*[:\-–—]\s*)/i, "").trim();
+  return value.replace(/^(?:\d+[\).]\s*|(?:pergunta|q|p)\s*[:\-��]\s*)/i, "").trim();
 }
 
 function detectStructuredPromptStyle(value: string): StructuredPromptStyle {
@@ -627,7 +628,7 @@ function normalizeStructuredSectionTitle(value: string) {
   const matched = value.match(structuredSectionMatcher);
   const raw = trimOuterPunctuation(matched?.[1] ?? matched?.[2] ?? value).replace(/^\[\s*|\s*\]$/g, "");
   if (!raw) {
-    return "Questionario importado";
+    return "Questionário importado";
   }
 
   return titleCase(raw);
@@ -676,7 +677,7 @@ function isStructuredAssociationItemLine(value: string) {
 }
 
 function stripListMarker(value: string) {
-  return value.replace(/^[-*•]\s*/, "").trim();
+  return value.replace(/^[-*"]\s*/, "").trim();
 }
 
 function joinStructuredAnswerLines(lines: string[]) {
@@ -693,7 +694,7 @@ function joinStructuredAnswerLines(lines: string[]) {
 }
 
 function inferStructuredTopic(prompt: string, answer: string, sectionTitle: string) {
-  if (sectionTitle && sectionTitle !== "Questionario importado" && isUsefulTopic(sectionTitle)) {
+  if (sectionTitle && sectionTitle !== "Questionário importado" && isUsefulTopic(sectionTitle)) {
     return sectionTitle;
   }
 
@@ -702,7 +703,7 @@ function inferStructuredTopic(prompt: string, answer: string, sectionTitle: stri
   );
 
   if (keywords.length === 0) {
-    return "Questoes importadas";
+    return "Questões importadas";
   }
 
   return titleCase(keywords.slice(0, 2).join(" "));
@@ -758,7 +759,7 @@ function dedupeStructuredQuestions(questions: ParsedStructuredQuestion[]) {
 export function parseStructuredQuestionnaire(text: string): ParsedStructuredQuestion[] {
   const rawLines = text.split(/\r?\n/).map(sanitizeStructuredLine);
   const questions: ParsedStructuredQuestion[] = [];
-  let sectionTitle = "Questionario importado";
+  let sectionTitle = "Questionário importado";
   let sectionIndex = 0;
   let sectionKind: StructuredSectionKind = "DEFAULT";
   let current: WorkingStructuredQuestion | null = null;
@@ -789,8 +790,8 @@ export function parseStructuredQuestionnaire(text: string): ParsedStructuredQues
     if (isAssociationInstructionLine(line)) {
       pushCurrent();
       sectionKind = "ASSOCIATION";
-      if (normalizeForComparison(sectionTitle) === normalizeForComparison("Questionario importado")) {
-        sectionTitle = "Questoes de associacao";
+      if (normalizeForComparison(sectionTitle) === normalizeForComparison("Questionário importado")) {
+        sectionTitle = "Questões de associação";
       }
       continue;
     }
@@ -866,7 +867,7 @@ export function detectStructuredQuestionnaire(text: string) {
 
 function buildTopicFallback(section: TextSection, content: string) {
   const preferredTitle = getPreferredTopicFromSection(section);
-  if (preferredTitle && preferredTitle !== "Visao geral") {
+  if (preferredTitle && preferredTitle !== "Visão geral") {
     return preferredTitle;
   }
 
@@ -1014,7 +1015,7 @@ function buildKnownProcedurePrompt(sentence: string, section: TextSection) {
 
   const afterValidationMatch = sentence.match(/^Apos\s+(.{12,120}?),\s+(.{20,220})$/i);
   if (afterValidationMatch && sectionTopic && /inventari/i.test(normalizeForComparison(sectionTopic))) {
-    return "O que deve acontecer apos a validacao das informacoes de estoque em um inventario?";
+    return "O que deve acontecer apos a validacao das informacoes de estoque em um inventário?";
   }
 
   const systematicMatch = sentence.match(/^(?:Na|No|Em)\s+(Sistematica\s+\d+),\s+(.{20,260})$/i);
@@ -1027,7 +1028,7 @@ function buildKnownProcedurePrompt(sentence: string, section: TextSection) {
 
   const quantityChangeMatch = sentence.match(/^Quanto a\s+carga seca(?:\s+e\s+congelada)?,\s+as lojas podem efetuar alteracao nas quantidades sugeridas(?:\s+ate\s+as\s+([0-9]{1,2}h))?/i);
   if (quantityChangeMatch) {
-    return "Em qual horario as lojas podem alterar as quantidades sugeridas para carga seca e congelada?";
+    return "Em qual horário as lojas podem alterar as quantidades sugeridas para carga seca e congelada?";
   }
 
   const actorMatch = sentence.match(/^(?:o|a|os|as)\s+([A-Z]{2,6}|[\p{L}]{3,40})\s+deve\b/iu);
@@ -1073,7 +1074,7 @@ function buildKnownListPrompt(sentence: string) {
   if (/os motivos mais comuns sao/i.test(normalized)) {
     return {
       topic: "Motivos mais comuns",
-      prompt: "Quais sao os motivos mais comuns?",
+      prompt: "Quais são os motivos mais comuns?",
     };
   }
 
@@ -1486,7 +1487,7 @@ function buildReferenceExcerpt(unit: KnowledgeUnit) {
 }
 
 function extractRubricHighlights(unit: KnowledgeUnit, limit = 5) {
-  const source = sanitizeAnswerText(unit.referenceExcerpt || unit.expectedAnswer);
+  const source = sanitizeAnswerText(unit.referenceExcerpt ?? unit.expectedAnswer);
   const acronymMatches = source.match(/\b[A-Z]{2,}(?:\s+[A-Z]{2,})*\b/g) ?? [];
   const phraseMatches = source.match(/\b(?:nota fiscal|impacto nos clientes|impacto nas vendas|carga seca|carga congelada|volume de oferta|saida media|cobertura de estoque|estoque padrao(?: final| tradicional)?|produtos nao atendidos|falta x excesso)\b/gi) ?? [];
   const keywordMatches = extractReferenceKeywords(source, limit + 4).filter(
@@ -1533,14 +1534,14 @@ function isPurposeStyleAnswer(answer: string) {
 
 function buildPurposePrompt(unit: KnowledgeUnit) {
   if (isDefinitionStyleAnswer(unit.expectedAnswer, unit.topic)) {
-    return `O que e ${unit.topic}?`;
+    return `O que é ${unit.topic}?`;
   }
 
   if (isPurposeStyleAnswer(unit.expectedAnswer)) {
     return `Para que serve ${unit.topic}?`;
   }
 
-  return `Qual e a finalidade de ${unit.topic}?`;
+  return `Qual é a finalidade de ${unit.topic}?`;
 }
 
 function buildDirectPrompt(unit: KnowledgeUnit) {
@@ -1550,17 +1551,17 @@ function buildDirectPrompt(unit: KnowledgeUnit) {
 
   switch (unit.kind) {
     case "definition":
-      return `O que e ${unit.topic}?`;
+      return `O que é ${unit.topic}?`;
     case "purpose":
       return buildPurposePrompt(unit);
     case "procedure":
-      return `Quais sao os principais procedimentos de ${unit.topic}?`;
+      return `Quais são os principais procedimentos de ${unit.topic}?`;
     case "rule":
       return `Qual regra deve ser observada em ${unit.topic}?`;
     case "formula":
-      return `Como e calculado ${unit.topic}?`;
+      return `Como é calculado ${unit.topic}?`;
     case "comparison":
-      return `Qual e a diferenca entre ${unit.topic}?`;
+      return `Qual é a diferença entre ${unit.topic}?`;
     case "list":
       return `Quais itens compoem ${unit.topic}?`;
   }
@@ -1573,17 +1574,17 @@ function buildQuickReviewPrompt(unit: KnowledgeUnit) {
 
   switch (unit.kind) {
     case "definition":
-      return `O que e ${unit.topic}?`;
+      return `O que é ${unit.topic}?`;
     case "purpose":
       return buildPurposePrompt(unit);
     case "procedure":
-      return `Quais sao os principais procedimentos de ${unit.topic}?`;
+      return `Quais são os principais procedimentos de ${unit.topic}?`;
     case "rule":
       return `Qual regra deve ser observada em ${unit.topic}?`;
     case "formula":
-      return `Como e calculado ${unit.topic}?`;
+      return `Como é calculado ${unit.topic}?`;
     case "comparison":
-      return `Qual e a diferenca entre ${unit.topic}?`;
+      return `Qual é a diferença entre ${unit.topic}?`;
     case "list":
       return `Quais itens compoem ${unit.topic}?`;
   }
@@ -1604,7 +1605,7 @@ function buildMultipleChoicePrompt(unit: KnowledgeUnit) {
     case "rule":
       return `Qual alternativa descreve corretamente a regra em ${unit.topic}?`;
     case "formula":
-      return `Qual alternativa descreve corretamente como ${unit.topic} e calculado?`;
+      return `Qual alternativa descreve corretamente como ${unit.topic} é calculado?`;
     case "comparison":
       return `Qual alternativa diferencia corretamente ${unit.topic}?`;
     case "list":
@@ -1800,7 +1801,7 @@ function buildStructuredRubric(question: ParsedStructuredQuestion, limit = 4) {
 
 function buildAssociationPrompt(question: ParsedStructuredQuestion) {
   const item = question.associationItem ?? question.prompt;
-  return `${item} esta associada a que?`;
+  return `${item} está associada a que?`;
 }
 
 function createStructuredShortAnswerQuestion(
@@ -2055,7 +2056,7 @@ function createStructuredMultipleChoiceQuestion(
 
   return {
     type: "MULTIPLE_CHOICE",
-    prompt: question.promptStyle === "ASSOCIATION" ? `${question.associationItem ?? question.prompt} esta associada a qual descricao?` : question.prompt,
+    prompt: question.promptStyle === "ASSOCIATION" ? `${question.associationItem ?? question.prompt} está associada a qual descrição?` : question.prompt,
     topic: question.topic,
     choices,
     correctAnswer: question.expectedAnswer,
@@ -2071,7 +2072,7 @@ function areQuestionsTooSimilar(left: QuestionDraft, right: QuestionDraft) {
 }
 
 function isKnownLongRawTopic(normalizedTopic: string) {
-  return /^(relatorio de produtos nao atendidos|relatorio de falta x excesso|alteracao de pedidos paes industrializados|alteracao de pedido sistematica \d+|gestao de estoque cobertura)$/.test(
+  return /^(relatório de produtos não atendidos|relatório de falta x excesso|alteração de pedidos paes industrializados|alteração de pedido sistematica \d+|gestão de estoque cobertura)$/.test(
     normalizedTopic,
   );
 }
@@ -2155,7 +2156,7 @@ function getAlignmentTopicTokens(topic: string) {
 }
 
 function containsSpecificAnswerDetail(answer: string) {
-  return /\b(placa|avarias|mercadoria|impropria|consumo|danificad|gondola|oferta|carga seca|congelad)\b/i.test(
+  return /\b(placa|avarias|mercadoria|imprópria|consumo|danificad|gondola|oferta|carga seca|congelad)\b/i.test(
     normalizeForComparison(answer),
   );
 }
@@ -2242,7 +2243,7 @@ function isPromptAnswerAligned(prompt: string, expectedAnswer: string, topic: st
   }
 
   if (containsSpecificAnswerDetail(expectedAnswer)) {
-    const detailTokens = ["placa", "avarias", "mercadoria", "impropria", "consumo", "gondola", "oferta"];
+    const detailTokens = ["placa", "avarias", "mercadoria", "imprópria", "consumo", "gôndola", "oferta"];
     if (!detailTokens.some((token) => normalizedPrompt.includes(token))) {
       return false;
     }
@@ -2285,7 +2286,7 @@ function getQuestionDraftRejectionReason(
     invalidTopicContentMatcher.test(question.prompt) ||
     (!options?.structured &&
       (
-        /^o que e (o|a|os|as|quanto|exemplo|resumo)\b/i.test(normalizedPrompt) ||
+        /^o que é (o|a|os|as|quanto|exemplo|resumo)\b/i.test(normalizedPrompt) ||
         /^resuma em uma frase o conceito de\b/i.test(normalizedPrompt) ||
         /^que problema\b/i.test(normalizedPrompt) ||
         /^qual alternativa corresponde melhor a\b/i.test(normalizedPrompt) ||
@@ -2456,19 +2457,19 @@ function resolveCompositionForMode(mode: QuizMode, composition?: QuizComposition
 
 function buildCompositionDescription(mode: QuizMode, composition: QuizComposition) {
   if (mode === "FEYNMAN") {
-    return "Sempre discursivo, com explicacoes e reformulacao didatica.";
+    return "Sempre discursivo, com explicações e reformulação didática.";
   }
 
   if (mode === "FLASHCARDS") {
-    return "Formato fixo de frente e verso para revisao rapida.";
+    return "Formato fixo de frente e verso para revisão rápida.";
   }
 
   if (mode === "QUICK_REVIEW" && composition === "AUTO") {
-    return "Prioriza multipla escolha, verdadeiro ou falso, lacunas e respostas curtas.";
+    return "Prioriza múltipla escolha, verdadeiro ou falso, lacunas e respostas curtas.";
   }
 
   if (mode === "DEEP_DIVE" && composition === "AUTO") {
-    return "Mistura perguntas objetivas com explicacoes curtas e discursivas.";
+    return "Mistura perguntas objetivas com explicações curtas e discursivas.";
   }
 
   if (mode === "EXAM" && composition === "AUTO") {
@@ -2476,7 +2477,7 @@ function buildCompositionDescription(mode: QuizMode, composition: QuizCompositio
   }
 
   if (composition === "MULTIPLE_CHOICE_ONLY") {
-    return "Usa apenas itens objetivos com alternativas plausiveis.";
+    return "Usa apenas itens objetivos com alternativas plausíveis.";
   }
 
   if (composition === "DISCURSIVE_ONLY") {
@@ -2652,9 +2653,9 @@ function getTargetQuestionCount(mode: QuizMode) {
 function getQuizModeTitle(mode: QuizMode) {
   switch (mode) {
     case "QUICK_REVIEW":
-      return "Revisao rapida";
+      return "Revisão rápida";
     case "DEEP_DIVE":
-      return "Questionario profundo";
+      return "Questionário profundo";
     case "EXAM":
       return "Modo prova";
     case "FEYNMAN":
@@ -2680,7 +2681,7 @@ function finalizeGeneratedQuestions(
       questions: questions.slice(0, target),
       generationNote:
         questions.length < target
-          ? `Este material importou ${questions.length} ${questions.length === 1 ? "pergunta util" : "perguntas uteis"} neste modo. Mantivemos somente as perguntas com resposta confiavel do arquivo.`
+          ? `Este material importou ${questions.length} ${questions.length === 1 ? "perguntatil" : "perguntasteis"} neste modo. Mantivemos somente as perguntas com resposta confivel do arquivo.`
           : undefined,
     };
   }
@@ -2724,9 +2725,9 @@ class MockQuizGenerator implements QuizGenerator {
     const options: QuizModeOption[] = [
       {
         mode: "QUICK_REVIEW",
-        title: "Revisao rapida",
+        title: "Revisão rápida",
         tagline: "Objetiva, direta e variada",
-        description: "Pode combinar multipla escolha, verdadeiro ou falso, lacunas e respostas curtas.",
+        description: "Pode combinar múltipla escolha, verdadeiro ou falso, lacunas e respostas curtas.",
         questionCount: getPreview("QUICK_REVIEW", "AUTO").length,
         questionTypes: [...new Set(getPreview("QUICK_REVIEW", "AUTO").map((question) => question.type))],
         emphasis: analysis.emphasis,
@@ -2735,7 +2736,7 @@ class MockQuizGenerator implements QuizGenerator {
       },
       {
         mode: "DEEP_DIVE",
-        title: "Questionario profundo",
+        title: "Questionário profundo",
         tagline: "Explica, compara e aplica",
         description: "Mistura objetivas e discursivas para cobrar entendimento mais completo.",
         questionCount: getPreview("DEEP_DIVE", "AUTO").length,
@@ -2748,7 +2749,7 @@ class MockQuizGenerator implements QuizGenerator {
         mode: "EXAM",
         title: "Modo prova",
         tagline: "Resultado no final da rodada",
-        description: "Mantem a pressao de prova, mas com composicao configuravel.",
+        description: "Mantém a pressão de prova, mas com composição configurável.",
         questionCount: getPreview("EXAM", "AUTO").length,
         questionTypes: [...new Set(getPreview("EXAM", "AUTO").map((question) => question.type))],
         emphasis: analysis.emphasis,
@@ -2770,7 +2771,7 @@ class MockQuizGenerator implements QuizGenerator {
         mode: "FLASHCARDS",
         title: "Flashcards",
         tagline: "Frente curta, verso completo",
-        description: "Mantem o formato fixo de cards para memoria ativa.",
+        description: "Mantém o formato fixo de cards para memória ativa.",
         questionCount: getPreview("FLASHCARDS", "AUTO").length,
         questionTypes: [...new Set(getPreview("FLASHCARDS", "AUTO").map((question) => question.type))],
         emphasis: analysis.emphasis,
@@ -2793,7 +2794,7 @@ class MockQuizGenerator implements QuizGenerator {
       composition: resolvedComposition,
       questions: generated.questions.map((question, index) => ({
         ...question,
-        topic: question.topic || `Topico ${index + 1}`,
+        topic: question.topic || `Tópico ${index + 1}`,
       })),
     };
   }
@@ -2812,6 +2813,8 @@ export function generateQuizFromDocument(document: Document, mode: QuizMode, com
 export function getMinimumQuestionTarget(mode: QuizMode) {
   return getTargetQuestionCount(mode);
 }
+
+
 
 
 

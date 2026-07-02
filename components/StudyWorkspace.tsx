@@ -64,7 +64,7 @@ export function StudyWorkspace() {
     setIsCreatingSession(false);
 
     if (!response.ok) {
-      setFlowError(payload.error ?? "Nao foi possivel abrir essa rodada de estudo.");
+      setFlowError(payload.error ?? "Não foi possível abrir essa rodada de estudo.");
       return;
     }
 
@@ -108,7 +108,7 @@ export function StudyWorkspace() {
       <div className="rounded-[2rem] border border-white/70 bg-white/70 px-6 py-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">RecallForge</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Transforme um questionario pronto em estudo interativo, sem tentar inventar perguntas novas.
+          Transforme um questionário pronto em estudo interativo.
         </p>
       </div>
 

@@ -63,7 +63,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
     setIsSubmitting(false);
 
     if (!response.ok) {
-      setError(payload.error ?? "Nao foi possivel validar esse questionario.");
+      setError(payload.error ?? "Não foi possível validar esse questionário.");
       return;
     }
 
@@ -73,7 +73,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-2">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-900">Envie um questionario pronto</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-900">Envie um questionário pronto</h2>
         <p className="text-sm text-slate-600">Cole perguntas e respostas ou envie um arquivo estruturado para estudar.</p>
       </div>
 
@@ -88,7 +88,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
               : "bg-white/70 text-slate-600 hover:bg-white",
           )}
         >
-          Colar questionario
+          Colar questionário
         </button>
         <button
           type="button"
@@ -110,7 +110,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Ex.: Revisao de microbiologia"
+            placeholder="Ex.: Revisão de microbiologia"
             className="w-full rounded-3xl border border-white/70 bg-white/80 px-5 py-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
           />
         </label>
@@ -120,7 +120,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
           <p className="mt-2 text-sm leading-6 text-slate-500">
             Texto colado ou upload de <span className="font-semibold text-slate-700">.txt</span>,{" "}
             <span className="font-semibold text-slate-700">.pdf</span> e{" "}
-            <span className="font-semibold text-slate-700">.docx</span>, desde que o conteudo ja esteja em formato de perguntas e respostas.
+            <span className="font-semibold text-slate-700">.docx</span>, desde que o conteúdo já esteja em formato de perguntas e respostas.
           </p>
         </div>
       </div>
@@ -133,7 +133,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
                 <FileText className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-800">Cole o questionario</p>
+                <p className="text-sm font-semibold text-slate-800">Cole o questionário</p>
                 <p className="text-xs text-slate-500">Ex.: `1. Pergunta?` + `Resposta:` + texto da resposta.</p>
               </div>
             </div>
@@ -145,7 +145,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
           <textarea
             value={manualText}
             onChange={(event) => setManualText(event.target.value)}
-            placeholder={"1. O que e fotossintese?\nResposta:\nProcesso em que...\n\n2. Quais sao as etapas?\nResposta:\n..."}
+            placeholder={"1. O que é fotossíntese?\nResposta:\nProcesso em que...\n\n2. Quais são as etapas?\nResposta:\n..."}
             className="mt-4 min-h-72 w-full resize-none rounded-[1.5rem] border border-slate-100 bg-white px-5 py-4 text-sm leading-7 text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
           />
         </div>
@@ -163,7 +163,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
             </div>
             <div className="space-y-2">
               <p className="text-base font-semibold text-slate-800">{file ? file.name : "Escolha um arquivo"}</p>
-              <p className="text-sm text-slate-500">Use um arquivo que ja contenha perguntas e respostas.</p>
+              <p className="text-sm text-slate-500">Use um arquivo que já contenha perguntas e respostas.</p>
             </div>
             <div className="rounded-full bg-cyan-50 px-4 py-2 text-xs font-semibold text-cyan-700">
               Formatos suportados: TXT, PDF e DOCX
@@ -177,13 +177,13 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
       ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-500">Vamos validar se o conteudo esta em formato de perguntas e respostas antes de iniciar.</div>
+        <div className="text-sm text-slate-500">Vamos validar se o conteúdo está em formato de perguntas e respostas antes de iniciar.</div>
         <button
           type="submit"
           disabled={pending}
           className="inline-flex items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70"
         >
-          {pending ? "Validando questionario..." : "Continuar"}
+          {pending ? "Validando questionário..." : "Continuar"}
         </button>
       </div>
     </form>

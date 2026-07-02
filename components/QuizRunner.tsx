@@ -62,7 +62,7 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
     setIsSubmitting(false);
 
     if (!response.ok) {
-      setError(data.error ?? "Nao conseguimos guardar sua resposta.");
+      setError(data.error ?? "Não conseguimos guardar sua resposta.");
       return;
     }
 
@@ -84,7 +84,7 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
     setIsCompleting(false);
 
     if (!response.ok) {
-      setError(data.error ?? "Nao conseguimos fechar essa rodada.");
+      setError(data.error ?? "Não conseguimos fechar essa rodada.");
       return;
     }
 
@@ -185,7 +185,7 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
           className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
         >
           <ArrowLeft className="h-4 w-4" />
-          Voltar ao inicio
+          Voltar ao início
         </button>
       </div>
 
@@ -224,7 +224,7 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
               onClick={() => setCurrentIndex((value) => value + 1)}
               className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:bg-slate-800"
             >
-              Proxima pergunta
+              Próxima pergunta
               <ArrowRight className="h-4 w-4" />
             </button>
           ) : (

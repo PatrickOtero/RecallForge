@@ -23,7 +23,7 @@ export async function POST(
   })) as SessionWithQuestionsAndAttempts | null;
 
   if (!session) {
-    return Response.json({ error: "Nao encontramos essa sessao de estudo." }, { status: 404 });
+    return Response.json({ error: "Não encontramos essa sessão de estudo." }, { status: 404 });
   }
 
   const questions = session.questions.map(serializeQuestionForEvaluation);

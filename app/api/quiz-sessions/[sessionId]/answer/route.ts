@@ -19,7 +19,7 @@ export async function POST(
   };
 
   if (!body.questionId) {
-    return Response.json({ error: "Nao foi possivel identificar a pergunta." }, { status: 400 });
+    return Response.json({ error: "Não foi possível identificar a pergunta." }, { status: 400 });
   }
 
   const session = await prisma.quizSession.findUnique({
@@ -27,7 +27,7 @@ export async function POST(
   });
 
   if (!session) {
-    return Response.json({ error: "Nao encontramos essa sessao de estudo." }, { status: 404 });
+    return Response.json({ error: "Não encontramos essa sessão de estudo." }, { status: 404 });
   }
 
   const questionRecord = await prisma.question.findFirst({
@@ -38,7 +38,7 @@ export async function POST(
   });
 
   if (!questionRecord) {
-    return Response.json({ error: "Essa pergunta nao esta mais disponivel." }, { status: 404 });
+    return Response.json({ error: "Essa pergunta não está mais disponível." }, { status: 404 });
   }
 
   const question = serializeQuestionForEvaluation(questionRecord);

@@ -74,7 +74,7 @@ export function resolveQuizComposition(mode: QuizMode, composition?: QuizComposi
 
 export function validateManualText(text: string) {
   if (!text.trim()) {
-    return "Cole um questionario com perguntas e respostas para continuar.";
+    return "Cole um questionário com perguntas e respostas para continuar.";
   }
 
   return null;
@@ -82,7 +82,7 @@ export function validateManualText(text: string) {
 
 export function validateUploadedFile(file: File) {
   if (file.size === 0) {
-    return "O arquivo enviado esta vazio. Escolha outro material para continuar.";
+    return "O arquivo enviado está vazio. Escolha outro material para continuar.";
   }
 
   const source = inferDocumentSource(file.name);
@@ -92,7 +92,7 @@ export function validateUploadedFile(file: File) {
 
   const mimeType = normalizeMimeType(file.type);
   if (mimeType && !supportedMimeTypes[source].has(mimeType)) {
-    return `O arquivo parece ser ${mimeType}, mas o nome indica ${path.extname(file.name)}. Confira se voce escolheu o material certo.`;
+    return `O arquivo parece ser ${mimeType}, mas o nome indica ${path.extname(file.name)}. Confira se você escolheu o material certo.`;
   }
 
   return null;
@@ -112,18 +112,18 @@ export function validateUploadedBuffer(
   }
 
   if (source === "PDF" && buffer.subarray(0, 4).toString("utf8") !== "%PDF") {
-    return "Nao conseguimos reconhecer um PDF valido nesse arquivo. Tente outro PDF ou envie o texto em .txt.";
+    return "Não conseguimos reconhecer um PDF válido nesse arquivo. Tente outro PDF ou envie o texto em .txt.";
   }
 
   if (source === "DOCX") {
     const isZip = buffer.subarray(0, 2).toString("hex") === "504b";
     if (!isZip) {
-      return "Nao conseguimos reconhecer um arquivo .docx valido. Se for um .doc antigo, converta para .docx ou .txt.";
+      return "Não conseguimos reconhecer um arquivo .docx válido. Se for um .doc antigo, converta para .docx ou .txt.";
     }
   }
 
   if (normalizedMime && !supportedMimeTypes[source].has(normalizedMime)) {
-    return `O arquivo foi enviado como ${normalizedMime}, mas nao parece compativel com ${extension}.`;
+    return `O arquivo foi enviado como ${normalizedMime}, mas não parece compatível com ${extension}.`;
   }
 
   return null;
@@ -131,18 +131,18 @@ export function validateUploadedBuffer(
 
 export function buildExtractionFailureMessage(source: DocumentSource) {
   if (source === "PDF") {
-    return "Nao conseguimos aproveitar texto suficiente desse PDF. Confira se o arquivo tem texto selecionavel ou tente a versao em .txt.";
+    return "Não conseguimos aproveitar texto suficiente desse PDF. Confira se o arquivo tem texto selecionável ou tente a versão em .txt.";
   }
 
   if (source === "DOCX") {
-    return "Nao conseguimos aproveitar texto suficiente desse .docx. Confira se o arquivo nao esta corrompido ou tente exportar novamente.";
+    return "Não conseguimos aproveitar texto suficiente desse .docx. Confira se o arquivo não está corrompido ou tente exportar novamente.";
   }
 
   if (source === "TXT") {
-    return "Nao conseguimos aproveitar texto suficiente desse arquivo .txt.";
+    return "Não conseguimos aproveitar texto suficiente desse arquivo .txt.";
   }
 
-  return "Nao foi possivel aproveitar conteudo suficiente. Cole um questionario com perguntas e respostas para continuar.";
+  return "Não foi possível aproveitar conteúdo suficiente. Cole um questionário com perguntas e respostas para continuar.";
 }
 
 export function deriveDocumentTitle(title: string, fileName: string | null, cleanedText: string) {
