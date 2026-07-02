@@ -9,6 +9,7 @@ import { FlashcardQuestion } from "@/components/FlashcardQuestion";
 import { MultipleChoiceQuestion } from "@/components/MultipleChoiceQuestion";
 import { QuestionCard } from "@/components/QuestionCard";
 import { QuizProgress } from "@/components/QuizProgress";
+import { ShortAnswerQuestion } from "@/components/ShortAnswerQuestion";
 import { TrueFalseQuestion } from "@/components/TrueFalseQuestion";
 import type {
   AnswerAttempt,
@@ -137,6 +138,17 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
           disabled={isSubmitting || Boolean(currentAttempt)}
           onSubmit={(selfAssessment) => submitAnswer({ selfAssessment })}
           question={currentQuestion}
+        />
+      );
+    }
+
+    if (currentQuestion.responseFormat === "SHORT") {
+      return (
+        <ShortAnswerQuestion
+          key={currentQuestion.id}
+          attempt={currentAttempt}
+          disabled={isSubmitting || Boolean(currentAttempt)}
+          onSubmit={(responseText) => submitAnswer({ responseText })}
         />
       );
     }

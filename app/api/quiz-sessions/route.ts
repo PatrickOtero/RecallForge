@@ -6,8 +6,8 @@ import {
   parseStructuredQuestionnaire,
 } from "@/lib/quiz/mock-quiz-generator";
 import { serializeDocument, serializeQuizSession } from "@/lib/serializers";
-import { serializeChoices } from "@/lib/utils";
-import { isQuizMode } from "@/lib/validation";
+import { serializeQuestionConfig } from "@/lib/utils";
+import { isQuizComposition, isQuizMode, resolveQuizComposition } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -15,11 +15,18 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     documentId?: string;
     mode?: string;
+    composition?: string;
   };
 
   if (!body.documentId || !body.mode || !isQuizMode(body.mode)) {
     return Response.json({ error: "Nao foi possivel abrir esse modo de estudo." }, { status: 400 });
   }
+
+  if (body.composition && !isQuizComposition(body.composition)) {
+    return Response.json({ error: "Nao foi possivel aplicar essa composicao de questoes." }, { status: 400 });
+  }
+
+  const requestedComposition = body.composition && isQuizComposition(body.composition) ? body.composition : undefined;
 
   const existingDocument = await prisma.document.findUnique({
     where: { id: body.documentId },
@@ -52,7 +59,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const generated = generateQuizFromDocument(document, body.mode);
+  const composition = resolveQuizComposition(body.mode, requestedComposition);
+  const generated = generateQuizFromDocument(document, body.mode, composition);
   if (generated.questions.length === 0) {
     return Response.json(
       {
@@ -80,7 +88,10 @@ export async function POST(request: Request) {
           position: index + 1,
           prompt: question.prompt,
           topic: question.topic,
-          choicesJson: serializeChoices(question.choices),
+          choicesJson: serializeQuestionConfig({
+            choices: question.choices,
+            responseFormat: question.responseFormat,
+          }),
           correctAnswer: question.correctAnswer ?? null,
           explanation: question.explanation ?? null,
           rubric: question.rubric ?? null,
@@ -94,7 +105,11 @@ export async function POST(request: Request) {
   });
 
   return Response.json({
-    session: serializeQuizSession(session),
+    session: {
+      ...serializeQuizSession(session),
+      composition,
+    },
+    composition,
     generationNote,
   });
 }

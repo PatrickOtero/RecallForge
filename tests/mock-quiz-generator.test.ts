@@ -112,7 +112,7 @@ test("trata P/R e secoes em colchetes sem vazar prefixos na multipla escolha", (
   assert.equal(parsed[0]?.expectedAnswer, "O Senhor/Senhora esqueceu-se de registrar o produto tal.");
   assert.equal(parsed[4]?.sectionTitle, "Faixas De Reposicao E Sugestao De Pedido");
 
-  const exam = generateQuizFromDocument(buildDocument(cleanedText), "EXAM");
+  const exam = generateQuizFromDocument(buildDocument(cleanedText), "EXAM", "MULTIPLE_CHOICE_ONLY");
 
   const abordagem = findQuestion(exam.questions, "qual expressao e indicada em abordagem corretiva");
   assert.ok(abordagem);
@@ -191,18 +191,87 @@ test("importa questionarios estruturados sem inventar perguntas novas", () => {
   Cabernet Sauvignon, Merlot, Cabernet Franc, Petit Verdot e Malbec.
   `);
 
-  const deepDive = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE");
-  const quickReview = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW");
+  const deepDive = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE", "AUTO");
+  const quickReview = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
   const flashcards = generateQuizFromDocument(buildDocument(cleanedText), "FLASHCARDS");
 
   assert.ok(findQuestion(deepDive.questions, "cinco partes principais da ficha de degustacao"));
-  assert.ok(findQuestion(quickReview.questions, "harmonizacao deve ser avaliada"));
+  assert.ok(quickReview.questions.some((question) => ["MULTIPLE_CHOICE", "TRUE_FALSE", "FILL_BLANK", "SHORT_ANSWER"].includes(question.type)));
   assert.ok(findQuestion(flashcards.questions, "limpidez indica"));
 
   for (const question of [...deepDive.questions, ...quickReview.questions, ...flashcards.questions]) {
     assert.ok(!/resuma em uma frase|que problema .* ajuda a resolver|qual alternativa descreve corretamente/i.test(question.prompt));
     assert.ok(!/use da seguinte forma|tente responder sem olhar|confira o gabarito/i.test(question.prompt));
   }
+});
+
+test("separa modo de estudo e composicao dos tipos de pergunta", () => {
+  const cleanedText = cleanExtractedText(`
+  [Fundamentos da gestao de estoques]
+  P: O que e ruptura?
+  R: E a falta de um produto no momento da compra pelo consumidor.
+
+  P: O que a cobertura de estoque mede?
+  R: Mede por quantos dias o estoque atual atende a demanda futura.
+
+  P: O que o relatorio de produtos nao atendidos verifica?
+  R: Verifica itens sugeridos para a loja que nao foram enviados pelo CD.
+
+  P: Como a saida media e calculada?
+  R: Ela considera o historico de vendas para estimar a media diaria de cada item.
+
+  [Faixas de reposicao]
+  P: No exemplo com estoque 35 e saida media 5, qual e a faixa de reposicao?
+  R: A cobertura e 7 dias, entao a faixa de reposicao fica em 50%.
+
+  P: No exemplo com estoque 21 e saida media 5, qual e a faixa de reposicao?
+  R: A cobertura e 4,2 dias, entao a faixa de reposicao fica em 95%.
+
+  P: No exemplo com estoque 42 e saida media 3, qual e a faixa de reposicao?
+  R: A cobertura e 14 dias, entao a faixa de reposicao fica em 30%.
+
+  P: Como calcular o estoque padrao final?
+  R: Multiplicando a saida media pela cobertura definida para o item.
+  `);
+
+  const quickReviewAuto = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
+  const quickReviewMcOnly = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "MULTIPLE_CHOICE_ONLY");
+  const deepDiveAuto = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE", "AUTO");
+  const deepDiveDiscursive = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE", "DISCURSIVE_ONLY");
+  const feynmanForced = generateQuizFromDocument(buildDocument(cleanedText), "FEYNMAN", "MULTIPLE_CHOICE_ONLY");
+
+  assert.ok(quickReviewAuto.questions.some((question) => question.type === "MULTIPLE_CHOICE"));
+  assert.ok(
+    quickReviewAuto.questions.some(
+      (question) => question.type === "TRUE_FALSE" || question.type === "FILL_BLANK" || question.responseFormat === "SHORT",
+    ),
+  );
+
+  assert.ok(quickReviewMcOnly.questions.length > 0);
+  assert.ok(quickReviewMcOnly.questions.every((question) => question.type === "MULTIPLE_CHOICE"));
+
+  assert.ok(deepDiveAuto.questions.some((question) => question.type === "MULTIPLE_CHOICE"));
+  assert.ok(
+    deepDiveAuto.questions.some(
+      (question) => question.type === "SHORT_ANSWER" && (question.responseFormat === "SHORT" || question.responseFormat === "LONG"),
+    ),
+  );
+
+  assert.ok(deepDiveDiscursive.questions.every((question) => question.type === "SHORT_ANSWER"));
+  assert.ok(deepDiveDiscursive.questions.some((question) => question.responseFormat === "LONG"));
+
+  assert.equal(feynmanForced.composition, "DISCURSIVE_ONLY");
+  assert.ok(feynmanForced.questions.every((question) => question.type === "SHORT_ANSWER"));
+  assert.ok(feynmanForced.questions.every((question) => question.responseFormat === "LONG"));
+  assert.ok(feynmanForced.questions.every((question) => /^Explique com suas palavras:/i.test(question.prompt)));
+
+  const options = generateQuizOptions(buildDocument(cleanedText));
+  const quickReviewOption = options.find((option) => option.mode === "QUICK_REVIEW");
+  const feynmanOption = options.find((option) => option.mode === "FEYNMAN");
+
+  assert.equal(quickReviewOption?.compositionOptions.length, 3);
+  assert.equal(feynmanOption?.compositionOptions.length, 1);
+  assert.equal(feynmanOption?.compositionOptions[0]?.composition, "DISCURSIVE_ONLY");
 });
 
 test("trata blocos de associacao sem carregar a instrucao para o prompt individual", () => {
@@ -235,7 +304,7 @@ test("trata blocos de associacao sem carregar a instrucao para o prompt individu
 
   const deepDive = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE");
   const flashcards = generateQuizFromDocument(buildDocument(cleanedText), "FLASHCARDS");
-  const exam = generateQuizFromDocument(buildDocument(cleanedText), "EXAM");
+  const exam = generateQuizFromDocument(buildDocument(cleanedText), "EXAM", "MULTIPLE_CHOICE_ONLY");
 
   const shortAnswer = findQuestion(deepDive.questions, "provence esta associada a que");
   assert.ok(shortAnswer);

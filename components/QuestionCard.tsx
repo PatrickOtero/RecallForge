@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { CheckCircle2, CircleAlert, Clock3 } from "lucide-react";
 
 import type { AnswerAttempt, Question } from "@/lib/types";
-import { cn, getQuestionTypeLabel } from "@/lib/utils";
+import { cn, getQuestionPresentationLabel } from "@/lib/utils";
 
 interface QuestionCardProps {
   attempt?: AnswerAttempt;
@@ -19,7 +19,7 @@ export function QuestionCard({ attempt, children, question, showImmediateFeedbac
     <div className="rounded-[2rem] border border-white/70 bg-white/80 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.08)] md:p-8">
       <div className="flex flex-wrap items-center gap-3">
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-          {getQuestionTypeLabel(question.type)}
+          {getQuestionPresentationLabel(question.type, question.responseFormat)}
         </span>
         <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-700">{question.topic}</span>
       </div>

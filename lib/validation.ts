@@ -1,7 +1,7 @@
 import path from "node:path";
 
-import type { DocumentSource, QuizMode } from "@/lib/types";
-import { quizModes } from "@/lib/types";
+import type { DocumentSource, QuizComposition, QuizMode } from "@/lib/types";
+import { quizCompositions, quizModes } from "@/lib/types";
 import { getUnsupportedFileMessage, humanizeDocumentTitle } from "@/lib/utils";
 
 export const MIN_TEXT_LENGTH = 140;
@@ -54,6 +54,22 @@ export const getFileValidationMessage = getUnsupportedFileMessage;
 
 export function isQuizMode(value: string): value is QuizMode {
   return quizModes.includes(value as QuizMode);
+}
+
+export function isQuizComposition(value: string): value is QuizComposition {
+  return quizCompositions.includes(value as QuizComposition);
+}
+
+export function resolveQuizComposition(mode: QuizMode, composition?: QuizComposition) {
+  if (mode === "FEYNMAN") {
+    return "DISCURSIVE_ONLY" as const;
+  }
+
+  if (mode === "FLASHCARDS") {
+    return "AUTO" as const;
+  }
+
+  return composition ?? "AUTO";
 }
 
 export function validateManualText(text: string) {

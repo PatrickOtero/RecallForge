@@ -11,6 +11,7 @@ import type {
   CreateQuizSessionResponse,
   Document,
   IngestDocumentResponse,
+  QuizComposition,
   QuizModeOption,
   QuizResultSummary as QuizSummary,
   QuizSession,
@@ -39,7 +40,7 @@ export function StudyWorkspace() {
     });
   }
 
-  async function handleModeSelect(mode: QuizModeOption["mode"]) {
+  async function handleModeSelect(mode: QuizModeOption["mode"], composition?: QuizComposition) {
     if (!document) {
       return;
     }
@@ -55,6 +56,7 @@ export function StudyWorkspace() {
       body: JSON.stringify({
         documentId: document.id,
         mode,
+        composition,
       }),
     });
 
@@ -69,6 +71,7 @@ export function StudyWorkspace() {
     startModeTransition(() => {
       setSession({
         ...payload.session,
+        composition: payload.composition,
         generationNote: payload.generationNote,
       });
       setStep("quiz");
@@ -80,7 +83,7 @@ export function StudyWorkspace() {
       return;
     }
 
-    void handleModeSelect(session.mode);
+    void handleModeSelect(session.mode, session.composition);
   }
 
   function handleBackToModes() {

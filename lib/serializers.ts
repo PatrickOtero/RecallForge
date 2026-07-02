@@ -11,7 +11,7 @@ import type {
   QuestionForEvaluation,
   QuizSession,
 } from "@/lib/types";
-import { humanizeDocumentTitle, safeJsonParse } from "@/lib/utils";
+import { humanizeDocumentTitle, parseQuestionConfig, safeJsonParse } from "@/lib/utils";
 
 type SessionWithQuestions = PrismaQuizSession & {
   questions: PrismaQuestion[];
@@ -36,6 +36,7 @@ export function serializeDocument(document: PrismaDocument): Document {
 }
 
 export function serializeQuestion(question: PrismaQuestion): Question {
+  const config = parseQuestionConfig(question.choicesJson);
   const baseQuestion = {
     id: question.id,
     sessionId: question.sessionId,
@@ -43,7 +44,8 @@ export function serializeQuestion(question: PrismaQuestion): Question {
     position: question.position,
     prompt: question.prompt,
     topic: question.topic,
-    choices: safeJsonParse(question.choicesJson, []),
+    choices: config.choices,
+    responseFormat: config.responseFormat,
   };
 
   if (question.type === "SHORT_ANSWER") {
@@ -67,6 +69,7 @@ export function serializeQuestion(question: PrismaQuestion): Question {
 }
 
 export function serializeQuestionForEvaluation(question: PrismaQuestion): QuestionForEvaluation {
+  const config = parseQuestionConfig(question.choicesJson);
   return {
     id: question.id,
     sessionId: question.sessionId,
@@ -74,7 +77,8 @@ export function serializeQuestionForEvaluation(question: PrismaQuestion): Questi
     position: question.position,
     prompt: question.prompt,
     topic: question.topic,
-    choices: safeJsonParse(question.choicesJson, []),
+    choices: config.choices,
+    responseFormat: config.responseFormat,
     correctAnswer: question.correctAnswer ?? undefined,
     explanation: question.explanation ?? undefined,
     rubric: question.rubric ?? undefined,

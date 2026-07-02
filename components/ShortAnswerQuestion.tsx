@@ -2,21 +2,19 @@
 
 import { useState } from "react";
 
-import type { AnswerAttempt, Question } from "@/lib/types";
+import type { AnswerAttempt } from "@/lib/types";
 
-interface DiscursiveQuestionProps {
+interface ShortAnswerQuestionProps {
   attempt?: AnswerAttempt;
   disabled: boolean;
   onSubmit: (responseText: string) => void;
-  question: Question;
 }
 
-export function DiscursiveQuestion({
+export function ShortAnswerQuestion({
   attempt,
   disabled,
   onSubmit,
-  question,
-}: DiscursiveQuestionProps) {
+}: ShortAnswerQuestionProps) {
   const [value, setValue] = useState(attempt?.responseText ?? "");
 
   return (
@@ -25,8 +23,8 @@ export function DiscursiveQuestion({
         value={value}
         disabled={disabled}
         onChange={(event) => setValue(event.target.value)}
-        placeholder="Explique com suas palavras, com contexto e exemplos simples quando fizer sentido."
-        className="min-h-48 w-full resize-none rounded-[1.75rem] border border-slate-200 bg-white px-5 py-4 text-sm leading-7 text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-80"
+        placeholder="Responda de forma curta e direta."
+        className="min-h-28 w-full resize-none rounded-[1.5rem] border border-slate-200 bg-white px-5 py-4 text-sm leading-7 text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-80"
       />
 
       {!attempt ? (
@@ -38,12 +36,6 @@ export function DiscursiveQuestion({
         >
           Salvar resposta
         </button>
-      ) : null}
-
-      {question.rubric ? (
-        <div className="rounded-3xl bg-slate-50 px-4 py-4 text-sm leading-6 text-slate-500">
-          <span className="font-semibold text-slate-700">Pontos que vale mencionar:</span> {question.rubric}
-        </div>
       ) : null}
     </div>
   );

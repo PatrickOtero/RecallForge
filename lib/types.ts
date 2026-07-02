@@ -14,6 +14,14 @@ export const questionTypes = [
   "FLASHCARD",
 ] as const;
 
+export const quizCompositions = [
+  "AUTO",
+  "MULTIPLE_CHOICE_ONLY",
+  "DISCURSIVE_ONLY",
+] as const;
+
+export const questionResponseFormats = ["SHORT", "LONG"] as const;
+
 export const flashcardRatings = ["MISS", "ALMOST", "GOT_IT"] as const;
 
 export const documentSources = ["MANUAL_TEXT", "TXT", "PDF", "DOCX"] as const;
@@ -21,6 +29,8 @@ export const documentSources = ["MANUAL_TEXT", "TXT", "PDF", "DOCX"] as const;
 export type DocumentSource = (typeof documentSources)[number];
 export type QuizMode = (typeof quizModes)[number];
 export type QuestionType = (typeof questionTypes)[number];
+export type QuizComposition = (typeof quizCompositions)[number];
+export type QuestionResponseFormat = (typeof questionResponseFormats)[number];
 export type FlashcardRating = (typeof flashcardRatings)[number];
 
 export interface Document {
@@ -44,6 +54,16 @@ export interface QuizModeOption {
   questionTypes: QuestionType[];
   emphasis: string[];
   immediateFeedback: boolean;
+  compositionOptions: QuizCompositionOption[];
+}
+
+export interface QuizCompositionOption {
+  composition: QuizComposition;
+  label: string;
+  description: string;
+  questionCount: number;
+  questionTypes: QuestionType[];
+  locked?: boolean;
 }
 
 export interface QuestionChoice {
@@ -56,6 +76,7 @@ export interface QuestionDraft {
   prompt: string;
   topic: string;
   choices?: QuestionChoice[];
+  responseFormat?: QuestionResponseFormat;
   correctAnswer?: string;
   explanation?: string;
   rubric?: string;
@@ -70,6 +91,7 @@ export interface Question {
   prompt: string;
   topic: string;
   choices?: QuestionChoice[];
+  responseFormat?: QuestionResponseFormat;
   expectedAnswer?: string;
   rubric?: string;
   referenceAnswer?: string;
@@ -84,6 +106,7 @@ export interface QuizSession {
   id: string;
   documentId: string;
   mode: QuizMode;
+  composition?: QuizComposition;
   title: string;
   questionCount: number;
   answeredCount: number;
@@ -135,6 +158,7 @@ export interface IngestDocumentResponse {
 
 export interface CreateQuizSessionResponse {
   session: QuizSession;
+  composition: QuizComposition;
   generationNote?: string;
 }
 

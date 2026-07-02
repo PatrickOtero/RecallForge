@@ -1,7 +1,9 @@
 import type {
   DocumentSource,
   QuestionChoice,
+  QuestionResponseFormat,
   QuestionType,
+  QuizComposition,
   QuizMode,
 } from "@/lib/types";
 
@@ -36,7 +38,7 @@ export function humanizeDocumentTitle(value: string) {
     .replace(/\.[a-z0-9]+$/i, "")
     .replace(/[_-]+/g, " ")
     .replace(/\bpara app\b/gi, "")
-    .replace(/\bmanual de gestao de estoques\b/i, "Manual de Gestão de Estoques")
+    .replace(/\bmanual de gestao de estoques\b/i, "Manual de Gestao de Estoques")
     .replace(/\s{2,}/g, " ")
     .trim();
 
@@ -61,10 +63,10 @@ export function humanizeDocumentTitle(value: string) {
 
 export function getUnsupportedFileMessage(fileName: string) {
   if (/\.doc$/i.test(fileName)) {
-    return "Arquivos .doc antigos ainda não são suportados. Converta para .docx ou .txt.";
+    return "Arquivos .doc antigos ainda nao sao suportados. Converta para .docx ou .txt.";
   }
 
-  return "Esse formato ainda não é suportado. Use texto colado, .txt, .pdf ou .docx.";
+  return "Esse formato ainda nao e suportado. Use texto colado, .txt, .pdf ou .docx.";
 }
 
 export function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
@@ -79,8 +81,53 @@ export function safeJsonParse<T>(value: string | null | undefined, fallback: T):
   }
 }
 
-export function serializeChoices(choices: QuestionChoice[] | undefined) {
-  return choices && choices.length > 0 ? JSON.stringify(choices) : null;
+export function serializeQuestionConfig({
+  choices,
+  responseFormat,
+}: {
+  choices?: QuestionChoice[];
+  responseFormat?: QuestionResponseFormat;
+}) {
+  if ((!choices || choices.length === 0) && !responseFormat) {
+    return null;
+  }
+
+  return JSON.stringify({
+    choices: choices ?? [],
+    responseFormat,
+  });
+}
+
+export function parseQuestionConfig(
+  value: string | null | undefined,
+): { choices: QuestionChoice[]; responseFormat?: QuestionResponseFormat } {
+  const parsed = safeJsonParse<unknown>(value, null);
+
+  if (Array.isArray(parsed)) {
+    return {
+      choices: parsed as QuestionChoice[],
+      responseFormat: undefined as QuestionResponseFormat | undefined,
+    };
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return {
+      choices: [] as QuestionChoice[],
+      responseFormat: undefined as QuestionResponseFormat | undefined,
+    };
+  }
+
+  const maybeChoices = "choices" in parsed ? (parsed as { choices?: unknown }).choices : [];
+  const maybeResponseFormat =
+    "responseFormat" in parsed ? (parsed as { responseFormat?: unknown }).responseFormat : undefined;
+
+  const responseFormat: QuestionResponseFormat | undefined =
+    maybeResponseFormat === "SHORT" || maybeResponseFormat === "LONG" ? maybeResponseFormat : undefined;
+
+  return {
+    choices: Array.isArray(maybeChoices) ? (maybeChoices as QuestionChoice[]) : [],
+    responseFormat,
+  };
 }
 
 export function roundScore(value: number) {
@@ -90,9 +137,9 @@ export function roundScore(value: number) {
 export function getQuizModeLabel(mode: QuizMode) {
   switch (mode) {
     case "QUICK_REVIEW":
-      return "Revisão rápida";
+      return "Revisao rapida";
     case "DEEP_DIVE":
-      return "Questionário profundo";
+      return "Questionario profundo";
     case "EXAM":
       return "Modo prova";
     case "FEYNMAN":
@@ -105,7 +152,7 @@ export function getQuizModeLabel(mode: QuizMode) {
 export function getQuestionTypeLabel(type: QuestionType) {
   switch (type) {
     case "MULTIPLE_CHOICE":
-      return "Múltipla escolha";
+      return "Multipla escolha";
     case "TRUE_FALSE":
       return "Verdadeiro ou falso";
     case "FILL_BLANK":
@@ -114,6 +161,25 @@ export function getQuestionTypeLabel(type: QuestionType) {
       return "Resposta curta";
     case "FLASHCARD":
       return "Flashcard";
+  }
+}
+
+export function getQuestionPresentationLabel(type: QuestionType, responseFormat?: QuestionResponseFormat) {
+  if (type === "SHORT_ANSWER" && responseFormat === "LONG") {
+    return "Resposta discursiva";
+  }
+
+  return getQuestionTypeLabel(type);
+}
+
+export function getQuizCompositionLabel(composition: QuizComposition) {
+  switch (composition) {
+    case "AUTO":
+      return "Misto automatico";
+    case "MULTIPLE_CHOICE_ONLY":
+      return "Apenas multipla escolha";
+    case "DISCURSIVE_ONLY":
+      return "Apenas discursivas";
   }
 }
 

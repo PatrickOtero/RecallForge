@@ -2,7 +2,10 @@ import type {
   Document,
   QuestionChoice,
   QuestionDraft,
+  QuestionResponseFormat,
+  QuizComposition,
   QuizMode,
+  QuizCompositionOption,
   QuizModeOption,
 } from "@/lib/types";
 import {
@@ -87,6 +90,12 @@ const targetQuestionCounts: Record<QuizMode, number> = {
   EXAM: 20,
   FEYNMAN: 8,
   FLASHCARDS: 20,
+};
+
+const compositionLabels: Record<QuizComposition, string> = {
+  AUTO: "Misto automatico",
+  MULTIPLE_CHOICE_ONLY: "Apenas multipla escolha",
+  DISCURSIVE_ONLY: "Apenas discursivas",
 };
 
 export const MINIMUM_STRUCTURED_QUESTION_PAIRS = 3;
@@ -1794,11 +1803,16 @@ function buildAssociationPrompt(question: ParsedStructuredQuestion) {
   return `${item} esta associada a que?`;
 }
 
-function createStructuredShortAnswerQuestion(question: ParsedStructuredQuestion): QuestionDraft {
+function createStructuredShortAnswerQuestion(
+  question: ParsedStructuredQuestion,
+  responseFormat: QuestionResponseFormat = "SHORT",
+  prompt = question.promptStyle === "ASSOCIATION" ? buildAssociationPrompt(question) : question.prompt,
+): QuestionDraft {
   return {
     type: "SHORT_ANSWER",
-    prompt: question.promptStyle === "ASSOCIATION" ? buildAssociationPrompt(question) : question.prompt,
+    prompt,
     topic: question.topic,
+    responseFormat,
     correctAnswer: question.expectedAnswer,
     referenceAnswer: question.referenceExcerpt,
     rubric: buildStructuredRubric(question),
@@ -1815,6 +1829,104 @@ function createStructuredFlashcardQuestion(question: ParsedStructuredQuestion): 
     referenceAnswer: question.referenceExcerpt,
     explanation: "Compare o verso com a resposta original antes de marcar seu desempenho.",
   };
+}
+
+function buildStructuredFeynmanPrompt(question: ParsedStructuredQuestion) {
+  const basePrompt = question.promptStyle === "ASSOCIATION" ? buildAssociationPrompt(question) : question.prompt;
+  return `Explique com suas palavras: ${basePrompt}`;
+}
+
+function createStructuredDiscursiveQuestion(question: ParsedStructuredQuestion): QuestionDraft {
+  return createStructuredShortAnswerQuestion(question, "LONG");
+}
+
+function createStructuredFeynmanQuestion(question: ParsedStructuredQuestion): QuestionDraft {
+  return createStructuredShortAnswerQuestion(question, "LONG", buildStructuredFeynmanPrompt(question));
+}
+
+function buildTrueFalseStatement(
+  question: ParsedStructuredQuestion,
+  questions: ParsedStructuredQuestion[],
+) {
+  const distractor = buildStructuredDistractorPool(question, questions)[0];
+  const useCorrectStatement =
+    (normalizeForComparison(question.prompt).length + countWords(question.expectedAnswer) + question.sectionIndex) % 2 === 0 ||
+    !distractor;
+
+  return useCorrectStatement
+    ? {
+        statement: question.expectedAnswer,
+        correctAnswer: "true",
+        explanation: question.expectedAnswer,
+      }
+    : {
+        statement: distractor.expectedAnswer,
+        correctAnswer: "false",
+        explanation: question.expectedAnswer,
+      };
+}
+
+function createStructuredTrueFalseQuestion(
+  question: ParsedStructuredQuestion,
+  questions: ParsedStructuredQuestion[],
+) {
+  if (!question.expectedAnswer || question.expectedAnswer.length < 12 || question.promptStyle === "ASSOCIATION") {
+    return null;
+  }
+
+  const statement = buildTrueFalseStatement(question, questions);
+  if (!isSafeStructuredAlternative(statement.statement)) {
+    return null;
+  }
+
+  return {
+    type: "TRUE_FALSE",
+    prompt: `Verdadeiro ou falso: ${statement.statement}`,
+    topic: question.topic,
+    correctAnswer: statement.correctAnswer,
+    explanation: statement.explanation,
+    referenceAnswer: question.referenceExcerpt,
+  } satisfies QuestionDraft;
+}
+
+function selectFillBlankToken(answer: string) {
+  const numberMatch = answer.match(/\b\d+(?:[.,]\d+)?%?\b/);
+  if (numberMatch) {
+    return numberMatch[0];
+  }
+
+  const keyword = extractReferenceKeywords(answer, 6).find((token) => token.length >= 4);
+  return keyword ?? null;
+}
+
+function createStructuredFillBlankQuestion(question: ParsedStructuredQuestion) {
+  if (question.promptStyle === "ASSOCIATION") {
+    return null;
+  }
+
+  const token = selectFillBlankToken(question.expectedAnswer);
+  if (!token) {
+    return null;
+  }
+
+  const matcher = new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+  if (!matcher.test(question.expectedAnswer)) {
+    return null;
+  }
+
+  const prompt = question.expectedAnswer.replace(matcher, "_____");
+  if (prompt === question.expectedAnswer || prompt.length < 18) {
+    return null;
+  }
+
+  return {
+    type: "FILL_BLANK",
+    prompt: `Complete a lacuna: ${prompt}`,
+    topic: question.topic,
+    correctAnswer: token,
+    explanation: question.expectedAnswer,
+    referenceAnswer: question.referenceExcerpt,
+  } satisfies QuestionDraft;
 }
 
 function hasLooselyComparableLength(left: string, right: string) {
@@ -2325,19 +2437,158 @@ function uniqueStructuredQuestions(questions: QuestionDraft[]) {
   return accepted;
 }
 
-function buildStructuredQuestionCandidates(questions: ParsedStructuredQuestion[], mode: QuizMode) {
-  const target = getTargetQuestionCount(mode);
-  const selected = takeBalancedStructuredQuestions(questions, Math.max(target, mode === "EXAM" ? 20 : target));
+function getAllowedCompositions(mode: QuizMode): QuizComposition[] {
+  if (mode === "FEYNMAN") {
+    return ["DISCURSIVE_ONLY"];
+  }
 
   if (mode === "FLASHCARDS") {
-    return selected.map(createStructuredFlashcardQuestion);
+    return ["AUTO"];
+  }
+
+  return ["AUTO", "MULTIPLE_CHOICE_ONLY", "DISCURSIVE_ONLY"];
+}
+
+function resolveCompositionForMode(mode: QuizMode, composition?: QuizComposition) {
+  const allowed = getAllowedCompositions(mode);
+  return allowed.includes(composition ?? "AUTO") ? (composition ?? "AUTO") : allowed[0];
+}
+
+function buildCompositionDescription(mode: QuizMode, composition: QuizComposition) {
+  if (mode === "FEYNMAN") {
+    return "Sempre discursivo, com explicacoes e reformulacao didatica.";
+  }
+
+  if (mode === "FLASHCARDS") {
+    return "Formato fixo de frente e verso para revisao rapida.";
+  }
+
+  if (mode === "QUICK_REVIEW" && composition === "AUTO") {
+    return "Prioriza multipla escolha, verdadeiro ou falso, lacunas e respostas curtas.";
+  }
+
+  if (mode === "DEEP_DIVE" && composition === "AUTO") {
+    return "Mistura perguntas objetivas com explicacoes curtas e discursivas.";
+  }
+
+  if (mode === "EXAM" && composition === "AUTO") {
+    return "Combina perguntas objetivas e discursivas para uma rodada mais completa.";
+  }
+
+  if (composition === "MULTIPLE_CHOICE_ONLY") {
+    return "Usa apenas itens objetivos com alternativas plausiveis.";
+  }
+
+  if (composition === "DISCURSIVE_ONLY") {
+    return mode === "QUICK_REVIEW"
+      ? "Usa respostas curtas e diretas, sem alternativas."
+      : "Usa apenas perguntas discursivas e respostas escritas.";
+  }
+
+  return "Combina os tipos mais adequados para este modo.";
+}
+
+type StructuredQuestionBuilder = (
+  question: ParsedStructuredQuestion,
+  questions: ParsedStructuredQuestion[],
+) => QuestionDraft | null;
+
+function createStructuredQuestionSet(
+  questions: ParsedStructuredQuestion[],
+  strategies: StructuredQuestionBuilder[],
+  limit: number,
+) {
+  const result: QuestionDraft[] = [];
+
+  for (let index = 0; index < questions.length && result.length < limit; index += 1) {
+    const question = questions[index];
+
+    for (let offset = 0; offset < strategies.length; offset += 1) {
+      const strategy = strategies[(index + offset) % strategies.length];
+      const candidate = strategy(question, questions);
+      if (!candidate) {
+        continue;
+      }
+
+      result.push(candidate);
+      break;
+    }
+  }
+
+  return result;
+}
+
+function rankQuestionsForDeepDive(questions: ParsedStructuredQuestion[]) {
+  return [...questions].sort((left, right) => {
+    const leftScore =
+      countWords(left.expectedAnswer) +
+      (/como|por que|explique|compare|aplique|diferenca|causa/i.test(left.prompt) ? 6 : 0);
+    const rightScore =
+      countWords(right.expectedAnswer) +
+      (/como|por que|explique|compare|aplique|diferenca|causa/i.test(right.prompt) ? 6 : 0);
+    return rightScore - leftScore;
+  });
+}
+
+function buildStructuredQuestionCandidates(
+  questions: ParsedStructuredQuestion[],
+  mode: QuizMode,
+  composition: QuizComposition,
+) {
+  const target = getTargetQuestionCount(mode);
+  const selectionSize = Math.max(target * 2, 24);
+  const selected =
+    mode === "DEEP_DIVE" || mode === "FEYNMAN"
+      ? rankQuestionsForDeepDive(takeBalancedStructuredQuestions(questions, selectionSize))
+      : takeBalancedStructuredQuestions(questions, selectionSize);
+  const multipleChoice: StructuredQuestionBuilder = (question, currentQuestions) =>
+    createStructuredMultipleChoiceQuestion(question, currentQuestions);
+  const trueFalse: StructuredQuestionBuilder = (question, currentQuestions) =>
+    createStructuredTrueFalseQuestion(question, currentQuestions);
+  const fillBlank: StructuredQuestionBuilder = (question) => createStructuredFillBlankQuestion(question);
+  const shortAnswer: StructuredQuestionBuilder = (question) =>
+    createStructuredShortAnswerQuestion(question, "SHORT");
+  const discursive: StructuredQuestionBuilder = (question) => createStructuredDiscursiveQuestion(question);
+  const feynman: StructuredQuestionBuilder = (question) => createStructuredFeynmanQuestion(question);
+  const flashcard: StructuredQuestionBuilder = (question) => createStructuredFlashcardQuestion(question);
+
+  if (mode === "FLASHCARDS") {
+    return createStructuredQuestionSet(selected, [flashcard], target);
+  }
+
+  if (mode === "FEYNMAN") {
+    return createStructuredQuestionSet(selected, [feynman], target);
+  }
+
+  if (composition === "MULTIPLE_CHOICE_ONLY") {
+    return createStructuredQuestionSet(selected, [multipleChoice], target);
+  }
+
+  if (mode === "QUICK_REVIEW") {
+    if (composition === "DISCURSIVE_ONLY") {
+      return createStructuredQuestionSet(selected, [shortAnswer], target);
+    }
+
+    return createStructuredQuestionSet(selected, [multipleChoice, trueFalse, fillBlank, shortAnswer], target);
+  }
+
+  if (mode === "DEEP_DIVE") {
+    if (composition === "DISCURSIVE_ONLY") {
+      return createStructuredQuestionSet(selected, [discursive, shortAnswer], target);
+    }
+
+    return createStructuredQuestionSet(selected, [multipleChoice, discursive, shortAnswer], target);
   }
 
   if (mode === "EXAM") {
-    return selected.map((question) => createStructuredMultipleChoiceQuestion(question, questions) ?? createStructuredShortAnswerQuestion(question));
+    if (composition === "DISCURSIVE_ONLY") {
+      return createStructuredQuestionSet(selected, [shortAnswer, discursive], target);
+    }
+
+    return createStructuredQuestionSet(selected, [multipleChoice, multipleChoice, shortAnswer, discursive, trueFalse], target);
   }
 
-  return selected.map(createStructuredShortAnswerQuestion);
+  return createStructuredQuestionSet(selected, [shortAnswer], target);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2413,9 +2664,16 @@ function getQuizModeTitle(mode: QuizMode) {
   }
 }
 
-function finalizeGeneratedQuestions(analysis: DocumentAnalysis, mode: QuizMode) {
+function finalizeGeneratedQuestions(
+  analysis: DocumentAnalysis,
+  mode: QuizMode,
+  composition: QuizComposition = resolveCompositionForMode(mode),
+) {
   if (analysis.structuredQuestions.length >= MINIMUM_STRUCTURED_QUESTION_PAIRS) {
-    const questions = uniqueStructuredQuestions(buildStructuredQuestionCandidates(analysis.structuredQuestions, mode));
+    const resolvedComposition = resolveCompositionForMode(mode, composition);
+    const questions = uniqueStructuredQuestions(
+      buildStructuredQuestionCandidates(analysis.structuredQuestions, mode, resolvedComposition),
+    );
     const target = getTargetQuestionCount(mode);
 
     return {
@@ -2436,77 +2694,103 @@ function finalizeGeneratedQuestions(analysis: DocumentAnalysis, mode: QuizMode) 
 class MockQuizGenerator implements QuizGenerator {
   generateQuizOptions(document: Document): QuizModeOption[] {
     const analysis = analyzeDocument(document);
-    const previews = {
-      QUICK_REVIEW: finalizeGeneratedQuestions(analysis, "QUICK_REVIEW").questions,
-      DEEP_DIVE: finalizeGeneratedQuestions(analysis, "DEEP_DIVE").questions,
-      EXAM: finalizeGeneratedQuestions(analysis, "EXAM").questions,
-      FEYNMAN: finalizeGeneratedQuestions(analysis, "FEYNMAN").questions,
-      FLASHCARDS: finalizeGeneratedQuestions(analysis, "FLASHCARDS").questions,
+    const previewCache = new Map<string, QuestionDraft[]>();
+    const getPreview = (mode: QuizMode, composition: QuizComposition) => {
+      const key = `${mode}:${composition}`;
+      const cached = previewCache.get(key);
+      if (cached) {
+        return cached;
+      }
+
+      const preview = finalizeGeneratedQuestions(analysis, mode, composition).questions;
+      previewCache.set(key, preview);
+      return preview;
     };
+
+    const buildCompositionOptions = (mode: QuizMode): QuizCompositionOption[] =>
+      getAllowedCompositions(mode).map((composition) => {
+        const preview = getPreview(mode, composition);
+
+        return {
+          composition,
+          label: compositionLabels[composition],
+          description: buildCompositionDescription(mode, composition),
+          questionCount: preview.length,
+          questionTypes: [...new Set(preview.map((question) => question.type))],
+          locked: getAllowedCompositions(mode).length === 1,
+        };
+      });
 
     const options: QuizModeOption[] = [
       {
         mode: "QUICK_REVIEW",
         title: "Revisao rapida",
-        tagline: "Sintese curta para aquecer a memoria",
-        description: "Prioriza explicacoes rapidas e sintese sem repetir o formato direto.",
-        questionCount: previews.QUICK_REVIEW.length,
-        questionTypes: [...new Set(previews.QUICK_REVIEW.map((question) => question.type))],
+        tagline: "Objetiva, direta e variada",
+        description: "Pode combinar multipla escolha, verdadeiro ou falso, lacunas e respostas curtas.",
+        questionCount: getPreview("QUICK_REVIEW", "AUTO").length,
+        questionTypes: [...new Set(getPreview("QUICK_REVIEW", "AUTO").map((question) => question.type))],
         emphasis: analysis.emphasis,
         immediateFeedback: true,
+        compositionOptions: buildCompositionOptions("QUICK_REVIEW"),
       },
       {
         mode: "DEEP_DIVE",
         title: "Questionario profundo",
-        tagline: "Conceitos claros e verificacao cuidadosa",
-        description: "Explora definicoes, finalidades, regras e comparacoes com mais contexto.",
-        questionCount: previews.DEEP_DIVE.length,
-        questionTypes: [...new Set(previews.DEEP_DIVE.map((question) => question.type))],
+        tagline: "Explica, compara e aplica",
+        description: "Mistura objetivas e discursivas para cobrar entendimento mais completo.",
+        questionCount: getPreview("DEEP_DIVE", "AUTO").length,
+        questionTypes: [...new Set(getPreview("DEEP_DIVE", "AUTO").map((question) => question.type))],
         emphasis: analysis.emphasis,
         immediateFeedback: true,
+        compositionOptions: buildCompositionOptions("DEEP_DIVE"),
       },
       {
         mode: "EXAM",
         title: "Modo prova",
-        tagline: "Mistura objetiva e discursiva",
-        description: "Usa somente questoes validadas, sem preencher a prova com alternativas ruins.",
-        questionCount: previews.EXAM.length,
-        questionTypes: [...new Set(previews.EXAM.map((question) => question.type))],
+        tagline: "Resultado no final da rodada",
+        description: "Mantem a pressao de prova, mas com composicao configuravel.",
+        questionCount: getPreview("EXAM", "AUTO").length,
+        questionTypes: [...new Set(getPreview("EXAM", "AUTO").map((question) => question.type))],
         emphasis: analysis.emphasis,
         immediateFeedback: false,
+        compositionOptions: buildCompositionOptions("EXAM"),
       },
       {
         mode: "FEYNMAN",
         title: "Modo Feynman",
         tagline: "Explique para consolidar",
-        description: "Foca em ensinar a ideia com clareza, como se voce estivesse orientando outra pessoa.",
-        questionCount: previews.FEYNMAN.length,
-        questionTypes: [...new Set(previews.FEYNMAN.map((question) => question.type))],
+        description: "Fica sempre discursivo, com foco em ensinar a ideia de forma simples.",
+        questionCount: getPreview("FEYNMAN", "DISCURSIVE_ONLY").length,
+        questionTypes: [...new Set(getPreview("FEYNMAN", "DISCURSIVE_ONLY").map((question) => question.type))],
         emphasis: analysis.emphasis,
         immediateFeedback: true,
+        compositionOptions: buildCompositionOptions("FEYNMAN"),
       },
       {
         mode: "FLASHCARDS",
         title: "Flashcards",
         tagline: "Frente curta, verso completo",
-        description: "Mostra o conceito na frente e a resposta esperada completa no verso.",
-        questionCount: previews.FLASHCARDS.length,
-        questionTypes: [...new Set(previews.FLASHCARDS.map((question) => question.type))],
+        description: "Mantem o formato fixo de cards para memoria ativa.",
+        questionCount: getPreview("FLASHCARDS", "AUTO").length,
+        questionTypes: [...new Set(getPreview("FLASHCARDS", "AUTO").map((question) => question.type))],
         emphasis: analysis.emphasis,
         immediateFeedback: true,
+        compositionOptions: buildCompositionOptions("FLASHCARDS"),
       },
     ];
 
     return options.filter((option) => option.questionCount > 0);
   }
 
-  generateQuizFromDocument(document: Document, mode: QuizMode): GeneratedQuiz {
+  generateQuizFromDocument(document: Document, mode: QuizMode, composition?: QuizComposition): GeneratedQuiz {
     const analysis = analyzeDocument(document);
-    const generated = finalizeGeneratedQuestions(analysis, mode);
+    const resolvedComposition = resolveCompositionForMode(mode, composition);
+    const generated = finalizeGeneratedQuestions(analysis, mode, resolvedComposition);
 
     return {
       title: `${document.title} - ${getQuizModeTitle(mode)}`,
       mode,
+      composition: resolvedComposition,
       questions: generated.questions.map((question, index) => ({
         ...question,
         topic: question.topic || `Topico ${index + 1}`,
@@ -2521,8 +2805,8 @@ export function generateQuizOptions(document: Document) {
   return generator.generateQuizOptions(document);
 }
 
-export function generateQuizFromDocument(document: Document, mode: QuizMode) {
-  return generator.generateQuizFromDocument(document, mode);
+export function generateQuizFromDocument(document: Document, mode: QuizMode, composition?: QuizComposition) {
+  return generator.generateQuizFromDocument(document, mode, composition);
 }
 
 export function getMinimumQuestionTarget(mode: QuizMode) {
