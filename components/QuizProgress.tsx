@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { quizProgressStyles as styles } from "./QuizProgress.styles";
 
 interface QuizProgressProps {
   current: number;
@@ -10,20 +10,15 @@ export function QuizProgress({ current, total, label }: QuizProgressProps) {
   const percentage = Math.max(0, Math.min(100, Math.round((current / total) * 100)));
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-slate-700">{label}</p>
-        <p className="text-sm text-slate-500">
+    <div className={styles.root}>
+      <div className={styles.header}>
+        <p className={styles.title}>{label}</p>
+        <p className={styles.counter}>
           Pergunta {current} de {total}
         </p>
       </div>
-      <div className="h-3 overflow-hidden rounded-full bg-slate-200/70">
-        <div
-          className={cn(
-            "h-full rounded-full bg-[linear-gradient(90deg,#0f172a_0%,#0891b2_55%,#67e8f9_100%)] transition-all duration-500",
-          )}
-          style={{ width: `${percentage}%` }}
-        />
+      <div className={styles.track}>
+        <div className={styles.bar} style={{ width: `${percentage}%` }} />
       </div>
     </div>
   );

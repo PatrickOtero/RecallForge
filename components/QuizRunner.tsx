@@ -3,13 +3,9 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, LoaderCircle } from "lucide-react";
 
-import { FillBlankQuestion } from "@/components/FillBlankQuestion";
-import { FlashcardQuestion } from "@/components/FlashcardQuestion";
-import { MatchingQuestion } from "@/components/MatchingQuestion";
-import { MultipleChoiceQuestion } from "@/components/MultipleChoiceQuestion";
 import { QuestionCard } from "@/components/QuestionCard";
 import { QuizProgress } from "@/components/QuizProgress";
-import { TrueFalseQuestion } from "@/components/TrueFalseQuestion";
+import { QuestionRenderer } from "@/components/quiz-renderers/QuestionRenderer";
 import type {
   AnswerAttempt,
   CompleteQuizSessionResponse,
@@ -18,6 +14,7 @@ import type {
   QuizSession,
   SubmitAnswerResponse,
 } from "@/lib/types";
+import { quizRunnerStyles as styles } from "./QuizRunner.styles";
 
 interface QuizRunnerProps {
   onComplete: (summary: QuizResultSummary) => void;
@@ -90,102 +87,26 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
     onComplete(data.summary);
   }
 
-  function renderQuestion() {
-    if (!currentQuestion) {
-      return null;
-    }
-
-    if (currentQuestion.type === "MULTIPLE_CHOICE") {
-      return (
-        <MultipleChoiceQuestion
-          key={currentQuestion.id}
-          attempt={currentAttempt}
-          disabled={isSubmitting || Boolean(currentAttempt)}
-          onSubmit={(responseText) => submitAnswer({ responseText })}
-          question={currentQuestion}
-        />
-      );
-    }
-
-    if (currentQuestion.type === "MATCHING") {
-      return (
-        <MatchingQuestion
-          key={currentQuestion.id}
-          attempt={currentAttempt}
-          disabled={isSubmitting || Boolean(currentAttempt)}
-          onSubmit={(responseText) => submitAnswer({ responseText })}
-          question={currentQuestion}
-        />
-      );
-    }
-
-    if (currentQuestion.type === "TRUE_FALSE") {
-      return (
-        <TrueFalseQuestion
-          key={currentQuestion.id}
-          attempt={currentAttempt}
-          disabled={isSubmitting || Boolean(currentAttempt)}
-          onSubmit={(responseText) => submitAnswer({ responseText })}
-        />
-      );
-    }
-
-    if (currentQuestion.type === "FILL_BLANK") {
-      return (
-        <FillBlankQuestion
-          key={currentQuestion.id}
-          attempt={currentAttempt}
-          disabled={isSubmitting || Boolean(currentAttempt)}
-          onSubmit={(responseText) => submitAnswer({ responseText })}
-        />
-      );
-    }
-
-    if (
-      currentQuestion.type === "FLASHCARD" ||
-      currentQuestion.type === "REVEAL_ANSWER" ||
-      currentQuestion.type === "SHORT_ANSWER"
-    ) {
-      return (
-        <FlashcardQuestion
-          key={currentQuestion.id}
-          attempt={currentAttempt}
-          disabled={isSubmitting || Boolean(currentAttempt)}
-          onSubmit={(selfAssessment) => submitAnswer({ selfAssessment })}
-          question={currentQuestion}
-        />
-      );
-    }
-
-    return null;
-  }
-
   if (!currentQuestion) {
     return null;
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className={styles.root}>
+      <div className={styles.topBar}>
         {session.generationNote ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {session.generationNote}
-          </div>
+          <div className={styles.generationNote}>{session.generationNote}</div>
         ) : (
           <div />
         )}
 
-        <button
-          type="button"
-          onClick={onExit}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-        >
-          <ArrowLeft className="h-4 w-4" />
+        <button type="button" onClick={onExit} className={styles.exitButton}>
+          <ArrowLeft className={styles.icon} />
           Voltar ao início
         </button>
       </div>
 
-      <div className="rounded-[2rem] border border-white/70 bg-white/75 p-6 shadow-[0_25px_80px_rgba(15,23,42,0.08)]">
+      <div className={styles.progressCard}>
         <QuizProgress
           current={currentIndex + (currentAttempt ? 1 : 0)}
           total={session.questionCount}
@@ -198,37 +119,41 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
         question={currentQuestion}
         showImmediateFeedback
       >
-        {renderQuestion()}
+        <QuestionRenderer
+          key={currentQuestion.id}
+          attempt={currentAttempt}
+          disabled={isSubmitting || Boolean(currentAttempt)}
+          onSubmit={submitAnswer}
+          question={currentQuestion}
+        />
       </QuestionCard>
 
-      {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
-      ) : null}
+      {error ? <div className={styles.error}>{error}</div> : null}
 
       {isSubmitting ? (
-        <div className="flex items-center gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white">
-          <LoaderCircle className="h-4 w-4 animate-spin" />
+        <div className={styles.submittingNotice}>
+          <LoaderCircle className={styles.spinner} />
           Guardando resposta...
         </div>
       ) : null}
 
       {currentAttempt ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+        <div className={styles.actions}>
           {!isLastQuestion ? (
             <button
               type="button"
               onClick={() => setCurrentIndex((value) => value + 1)}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:bg-slate-800"
+              className={styles.nextButton}
             >
               Próxima pergunta
-              <ArrowRight className="h-4 w-4" />
+              <ArrowRight className={styles.icon} />
             </button>
           ) : (
             <button
               type="button"
               onClick={finishSession}
               disabled={isCompleting}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70"
+              className={styles.finishButton}
             >
               {isCompleting ? "Fechando rodada..." : "Ver resultado final"}
             </button>

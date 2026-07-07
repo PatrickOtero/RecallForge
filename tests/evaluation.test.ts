@@ -22,7 +22,7 @@ test("nao corrige resposta aberta por comparacao semantica", () => {
   assert.equal(result.selfAssessment, "ALMOST");
   assert.equal(result.isCorrect, false);
   assert.equal(result.score, 0.6);
-  assert.match(result.feedback ?? "", /Autoavaliacao registrada/i);
+  assert.match(result.feedback ?? "", /Autoavaliação registrada/i);
 });
 
 test("corrige associacao por pares objetivos", () => {
@@ -43,5 +43,5 @@ test("corrige associacao por pares objetivos", () => {
 
   assert.equal(result.isCorrect, true);
   assert.equal(result.score, 1);
-  assert.match(result.feedback ?? "", /associacoes estao corretas/i);
+  assert.match(result.feedback ?? "", /associações estão corretas/i);
 });

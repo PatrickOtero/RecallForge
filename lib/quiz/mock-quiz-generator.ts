@@ -20,6 +20,13 @@ import {
   uniqueConceptTokens,
 } from "@/lib/quiz/concept-utils";
 import type { GeneratedQuiz, QuizGenerator } from "@/lib/quiz/generator-interface";
+import { computeStudyBankCapabilities, parseMatchingQuestionDrafts, type StudyBankCapabilities } from "@/lib/quiz-parser";
+import { buildQuizSessionTitle } from "@/lib/quiz-session/build-session";
+import { getAvailableModes, getModeQuestionTypes, isQuestionCompatibleWithMode } from "@/lib/quiz-session/mode-compatibility";
+import {
+  getUnavailableModeMessage as getConfiguredUnavailableModeMessage,
+  studyModeConfigs,
+} from "@/lib/quiz-session/mode-config";
 import { normalizeForComparison, titleCase } from "@/lib/utils";
 
 type KnowledgeKind =
@@ -51,6 +58,7 @@ interface DocumentAnalysis {
   structuredDrafts: QuestionDraft[];
   units: KnowledgeUnit[];
   structuredQuestions: ParsedStructuredQuestion[];
+  capabilities: StudyBankCapabilities;
 }
 
 interface GeneratedQuestionCandidate {
@@ -118,41 +126,6 @@ const compositionLabels: Record<QuizComposition, string> = {
 };
 
 export const MINIMUM_STRUCTURED_QUESTION_PAIRS = 3;
-
-function getModeUnavailableMessage(mode: QuizMode) {
-  switch (mode) {
-    case "DEEP_DIVE":
-      return "Não há questões suficientes para múltipla escolha com alternativas plausíveis.";
-    case "EXAM":
-      return "Este questionário não possui questões de verdadeiro/falso reconhecíveis.";
-    case "FLASHCARDS":
-      return "Este questionário não possui blocos de associação reconhecíveis.";
-    case "FEYNMAN":
-      return "Este questionário não possui perguntas com resposta reconhecível para revelar.";
-    case "QUICK_REVIEW":
-      return "Este questionário não possui tipos suficientes para montar uma revisão geral.";
-  }
-}
-
-function getModeQuestionTypes(mode: QuizMode, questions: QuestionDraft[]) {
-  if (mode === "QUICK_REVIEW") {
-    return [...new Set(questions.map((question) => question.type))];
-  }
-
-  if (mode === "DEEP_DIVE") {
-    return ["MULTIPLE_CHOICE"] satisfies QuestionDraft["type"][];
-  }
-
-  if (mode === "EXAM") {
-    return ["TRUE_FALSE"] satisfies QuestionDraft["type"][];
-  }
-
-  if (mode === "FLASHCARDS") {
-    return ["MATCHING"] satisfies QuestionDraft["type"][];
-  }
-
-  return ["REVEAL_ANSWER"] satisfies QuestionDraft["type"][];
-}
 
 const rawTopicWhitelist = new Set(
   [
@@ -1562,6 +1535,7 @@ function dedupeQuestionDrafts(questions: QuestionDraft[]) {
 
 function parseReadyQuestionDrafts(text: string, structuredQuestions: ParsedStructuredQuestion[]) {
   return dedupeQuestionDrafts([
+    ...parseMatchingQuestionDrafts(text),
     ...parseReadyMultipleChoiceDrafts(text),
     ...parseColumnMatchingDrafts(text),
     ...buildAssociationDraftsFromStructured(structuredQuestions),
@@ -2083,6 +2057,7 @@ function dedupeUnits(units: KnowledgeUnit[]) {
 function analyzeDocument(document: Document): DocumentAnalysis {
   const structuredQuestions = parseStructuredQuestionnaire(document.cleanedText).filter(isUsableStructuredQuestion);
   const structuredDrafts = parseReadyQuestionDrafts(document.cleanedText, structuredQuestions);
+  const capabilities = computeStudyBankCapabilities(structuredDrafts);
   const sections = extractSections(document.cleanedText);
   const trueFalseCount = structuredDrafts.filter((question) => question.type === "TRUE_FALSE").length;
   const flashcardCount = structuredDrafts.filter((question) => question.type === "FLASHCARD").length;
@@ -2099,6 +2074,7 @@ function analyzeDocument(document: Document): DocumentAnalysis {
       units: [],
       structuredDrafts,
       structuredQuestions,
+      capabilities,
       emphasis: [
         ...new Set([
           ...structuredDrafts.map((question) => question.topic),
@@ -2114,6 +2090,7 @@ function analyzeDocument(document: Document): DocumentAnalysis {
     units: [],
     structuredDrafts: [],
     structuredQuestions: [],
+    capabilities,
     emphasis: [],
   };
 }
@@ -3587,7 +3564,7 @@ function createStructuredQuestionSet(
 function normalizeQuestionForMode(question: QuestionDraft, mode: QuizMode): QuestionDraft {
   if (
     (mode === "QUICK_REVIEW" || mode === "FEYNMAN") &&
-    (question.type === "FLASHCARD" || question.type === "SHORT_ANSWER")
+    question.type === "SHORT_ANSWER"
   ) {
     return {
       ...question,
@@ -3600,18 +3577,7 @@ function normalizeQuestionForMode(question: QuestionDraft, mode: QuizMode): Ques
 }
 
 function isReadyDraftCompatible(question: QuestionDraft, mode: QuizMode) {
-  switch (mode) {
-    case "QUICK_REVIEW":
-      return ["MULTIPLE_CHOICE", "TRUE_FALSE", "MATCHING", "FLASHCARD", "REVEAL_ANSWER"].includes(question.type);
-    case "DEEP_DIVE":
-      return question.type === "MULTIPLE_CHOICE";
-    case "EXAM":
-      return question.type === "TRUE_FALSE";
-    case "FEYNMAN":
-      return question.type === "FLASHCARD" || question.type === "REVEAL_ANSWER";
-    case "FLASHCARDS":
-      return question.type === "MATCHING";
-  }
+  return isQuestionCompatibleWithMode(question, mode);
 }
 
 function takeReadyDraftsForMode(
@@ -3747,21 +3713,6 @@ function getTargetQuestionCount(mode: QuizMode) {
   return targetQuestionCounts[mode];
 }
 
-function getQuizModeTitle(mode: QuizMode) {
-  switch (mode) {
-    case "QUICK_REVIEW":
-      return "Revisão geral";
-    case "DEEP_DIVE":
-      return "Múltipla escolha";
-    case "EXAM":
-      return "Verdadeiro/Falso";
-    case "FEYNMAN":
-      return "Revelar resposta";
-    case "FLASHCARDS":
-      return "Associação";
-  }
-}
-
 function finalizeGeneratedQuestions(
   analysis: DocumentAnalysis,
   mode: QuizMode,
@@ -3801,6 +3752,10 @@ function finalizeGeneratedQuestions(
 class MockQuizGenerator implements QuizGenerator {
   generateQuizOptions(document: Document): QuizModeOption[] {
     const analysis = analyzeDocument(document);
+    if (analysis.structuredQuestions.length === 0 && analysis.structuredDrafts.length === 0) {
+      return [];
+    }
+
     const previewCache = new Map<string, QuestionDraft[]>();
     const getPreview = (mode: QuizMode, composition: QuizComposition) => {
       const key = `${mode}:${composition}`;
@@ -3828,68 +3783,26 @@ class MockQuizGenerator implements QuizGenerator {
         };
       });
 
-    const options: QuizModeOption[] = [
-      {
-        mode: "QUICK_REVIEW",
-        title: "Revisão geral",
-        tagline: "Objetiva, direta e variada",
-        description: "Combina os tipos disponíveis no questionário: múltipla escolha, verdadeiro/falso, associação e revelar resposta.",
-        questionCount: getPreview("QUICK_REVIEW", "AUTO").length,
-        questionTypes: getModeQuestionTypes("QUICK_REVIEW", getPreview("QUICK_REVIEW", "AUTO")),
+    const parsedAvailability = getAvailableModes(analysis.capabilities);
+    const options: QuizModeOption[] = studyModeConfigs.map((config) => {
+      const preview = getPreview(config.mode, config.composition);
+      const parsedMode = parsedAvailability.find((item) => item.mode === config.mode);
+      const available = preview.length > 0 || Boolean(parsedMode?.available && config.mode === "QUICK_REVIEW");
+
+      return {
+        mode: config.mode,
+        title: config.title,
+        tagline: config.tagline,
+        description: config.description,
+        questionCount: preview.length,
+        questionTypes: getModeQuestionTypes(config.mode, preview),
         emphasis: analysis.emphasis,
         immediateFeedback: true,
-        compositionOptions: buildCompositionOptions("QUICK_REVIEW"),
-        unavailableMessage: getModeUnavailableMessage("QUICK_REVIEW"),
-      },
-      {
-        mode: "DEEP_DIVE",
-        title: "Múltipla escolha",
-        tagline: "Alternativas objetivas",
-        description: "Usa questões com alternativas prontas ou perguntas convertíveis com distratores plausíveis.",
-        questionCount: getPreview("DEEP_DIVE", "MULTIPLE_CHOICE_ONLY").length,
-        questionTypes: getModeQuestionTypes("DEEP_DIVE", getPreview("DEEP_DIVE", "MULTIPLE_CHOICE_ONLY")),
-        emphasis: analysis.emphasis,
-        immediateFeedback: true,
-        compositionOptions: buildCompositionOptions("DEEP_DIVE"),
-        unavailableMessage: getModeUnavailableMessage("DEEP_DIVE"),
-      },
-      {
-        mode: "EXAM",
-        title: "Verdadeiro/Falso",
-        tagline: "Correção objetiva",
-        description: "Usa apenas afirmações marcadas como verdadeiro/falso ou certo/errado no arquivo.",
-        questionCount: getPreview("EXAM", "AUTO").length,
-        questionTypes: getModeQuestionTypes("EXAM", getPreview("EXAM", "AUTO")),
-        emphasis: analysis.emphasis,
-        immediateFeedback: true,
-        compositionOptions: buildCompositionOptions("EXAM"),
-        unavailableMessage: getModeUnavailableMessage("EXAM"),
-      },
-      {
-        mode: "FEYNMAN",
-        title: "Revelar resposta",
-        tagline: "Pergunta, resposta e autoavaliação",
-        description: "Mostra a pergunta, revela o gabarito e permite marcar Errei, Quase ou Acertei.",
-        questionCount: getPreview("FEYNMAN", "DISCURSIVE_ONLY").length,
-        questionTypes: getModeQuestionTypes("FEYNMAN", getPreview("FEYNMAN", "DISCURSIVE_ONLY")),
-        emphasis: analysis.emphasis,
-        immediateFeedback: true,
-        compositionOptions: buildCompositionOptions("FEYNMAN"),
-        unavailableMessage: getModeUnavailableMessage("FEYNMAN"),
-      },
-      {
-        mode: "FLASHCARDS",
-        title: "Associação",
-        tagline: "Pares e correspondências",
-        description: "Usa blocos de associação para relacionar itens às respostas corretas.",
-        questionCount: getPreview("FLASHCARDS", "AUTO").length,
-        questionTypes: getModeQuestionTypes("FLASHCARDS", getPreview("FLASHCARDS", "AUTO")),
-        emphasis: analysis.emphasis,
-        immediateFeedback: true,
-        compositionOptions: buildCompositionOptions("FLASHCARDS"),
-        unavailableMessage: getModeUnavailableMessage("FLASHCARDS"),
-      },
-    ];
+        compositionOptions: buildCompositionOptions(config.mode),
+        available,
+        unavailableMessage: config.unavailableMessage,
+      };
+    });
 
     return options;
   }
@@ -3900,7 +3813,7 @@ class MockQuizGenerator implements QuizGenerator {
     const generated = finalizeGeneratedQuestions(analysis, mode, resolvedComposition);
 
     return {
-      title: `${document.title} - ${getQuizModeTitle(mode)}`,
+      title: buildQuizSessionTitle(document.title, mode),
       mode,
       composition: resolvedComposition,
       questions: generated.questions.map((question, index) => ({
@@ -3926,7 +3839,7 @@ export function getMinimumQuestionTarget(mode: QuizMode) {
 }
 
 export function getUnavailableModeMessage(mode: QuizMode) {
-  return getModeUnavailableMessage(mode);
+  return getConfiguredUnavailableModeMessage(mode);
 }
 
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { CheckCircle2, Circle, CircleX } from "lucide-react";
 
 import type { AnswerAttempt, FlashcardRating, Question } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { flashcardQuestionStyles as styles } from "./FlashcardQuestion.styles";
 
 interface FlashcardQuestionProps {
   attempt?: AnswerAttempt;
@@ -14,9 +14,9 @@ interface FlashcardQuestionProps {
 }
 
 const actions = [
-  { label: "Errei", value: "MISS", icon: CircleX, classes: "bg-rose-50 text-rose-700" },
-  { label: "Quase", value: "ALMOST", icon: Circle, classes: "bg-amber-50 text-amber-700" },
-  { label: "Acertei", value: "GOT_IT", icon: CheckCircle2, classes: "bg-emerald-50 text-emerald-700" },
+  { label: "Errei", value: "MISS", icon: CircleX, tone: "miss" },
+  { label: "Quase", value: "ALMOST", icon: Circle, tone: "almost" },
+  { label: "Acertei", value: "GOT_IT", icon: CheckCircle2, tone: "gotIt" },
 ] as const;
 
 export function FlashcardQuestion({
@@ -28,38 +28,38 @@ export function FlashcardQuestion({
   const [revealed, setRevealed] = useState(Boolean(attempt));
 
   return (
-    <div className="space-y-4">
+    <div className={styles.root}>
       {!revealed ? (
         <button
           type="button"
           disabled={disabled}
           onClick={() => setRevealed(true)}
-          className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className={styles.revealButton}
         >
           Mostrar resposta
         </button>
       ) : null}
 
       {revealed ? (
-        <div className="space-y-3 rounded-[1.75rem] border border-cyan-100 bg-cyan-50/80 p-5">
+        <div className={styles.answerPanel}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">Resposta</p>
-            <p className="mt-3 text-sm leading-7 text-slate-700">
+            <p className={styles.label}>Resposta</p>
+            <p className={styles.answerText}>
               {question.expectedAnswer ?? "Sem resposta sugerida."}
             </p>
           </div>
 
           {question.referenceAnswer ? (
-            <div className="border-t border-cyan-100 pt-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">Trecho de apoio</p>
-              <p className="mt-2 text-sm leading-7 text-slate-700">{question.referenceAnswer}</p>
+            <div className={styles.referenceBlock}>
+              <p className={styles.label}>Trecho de apoio</p>
+              <p className={styles.referenceText}>{question.referenceAnswer}</p>
             </div>
           ) : null}
         </div>
       ) : null}
 
       {revealed && !attempt ? (
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className={styles.actions}>
           {actions.map((action) => {
             const Icon = action.icon;
 
@@ -69,12 +69,9 @@ export function FlashcardQuestion({
                 type="button"
                 disabled={disabled}
                 onClick={() => onSubmit(action.value)}
-                className={cn(
-                  "flex items-center justify-center gap-2 rounded-3xl px-4 py-4 text-sm font-semibold transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60",
-                  action.classes,
-                )}
+                className={styles.actionButton(action.tone)}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className={styles.actionIcon} />
                 {action.label}
               </button>
             );

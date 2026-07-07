@@ -3,6 +3,7 @@
 import { ArrowRight, Gauge, RotateCcw, Sparkles } from "lucide-react";
 
 import type { QuizResultSummary as QuizResult, QuizSession } from "@/lib/types";
+import { quizResultSummaryStyles as styles } from "./QuizResultSummary.styles";
 
 interface QuizResultSummaryProps {
   session: QuizSession;
@@ -20,75 +21,75 @@ export function QuizResultSummary({
   onStartOver,
 }: QuizResultSummaryProps) {
   return (
-    <div className="space-y-6">
-      <div className="rounded-[2rem] border border-white/70 bg-white/80 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.08)] md:p-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+    <div className={styles.root}>
+      <div className={styles.heroCard}>
+        <div className={styles.heroLayout}>
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Resultado final</p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">{session.title}</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
+            <p className={styles.eyebrow}>Resultado final</p>
+            <h2 className={styles.title}>{session.title}</h2>
+            <p className={styles.description}>
               Veja onde você foi bem e quais pontos merecem uma revisão mais atenta.
             </p>
           </div>
 
-          <div className="flex h-40 w-40 items-center justify-center rounded-full bg-[radial-gradient(circle_at_top,#67e8f9,transparent_55%),linear-gradient(135deg,#0f172a,#155e75)] text-white shadow-[0_20px_60px_rgba(8,145,178,0.35)]">
-            <div className="text-center">
-              <p className="text-xs uppercase tracking-[0.24em] text-cyan-100">Nota</p>
-              <p className="mt-2 text-5xl font-semibold">{summary.score}</p>
+          <div className={styles.scoreBadge}>
+            <div className={styles.scoreContent}>
+              <p className={styles.scoreLabel}>Nota</p>
+              <p className={styles.scoreValue}>{summary.score}</p>
             </div>
           </div>
         </div>
       </div>
 
       {session.generationNote ? (
-        <div className="rounded-[1.75rem] border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800">
+        <div className={styles.generationNote}>
           {session.generationNote}
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-[1.75rem] bg-slate-900 p-5 text-white shadow-lg shadow-slate-900/15">
-          <Gauge className="h-5 w-5 text-cyan-300" />
-          <p className="mt-4 text-sm text-slate-300">Acertos</p>
-          <p className="mt-2 text-3xl font-semibold">{summary.correctCount}</p>
+      <div className={styles.statsGrid}>
+        <div className={styles.correctStat}>
+          <Gauge className={styles.statIcon} />
+          <p className={styles.darkStatLabel}>Acertos</p>
+          <p className={styles.darkStatValue}>{summary.correctCount}</p>
         </div>
-        <div className="rounded-[1.75rem] bg-white/80 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <p className="text-sm text-slate-500">Erros</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{summary.wrongCount}</p>
+        <div className={styles.statCard}>
+          <p className={styles.statLabel}>Erros</p>
+          <p className={styles.statValue}>{summary.wrongCount}</p>
         </div>
-        <div className="rounded-[1.75rem] bg-white/80 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <p className="text-sm text-slate-500">Perguntas</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{session.questionCount}</p>
+        <div className={styles.statCard}>
+          <p className={styles.statLabel}>Perguntas</p>
+          <p className={styles.statValue}>{session.questionCount}</p>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
-        <div className="rounded-[1.75rem] bg-white/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">Pontos para revisar</p>
-          <div className="mt-4 flex flex-wrap gap-2">
+      <div className={styles.detailGrid}>
+        <div className={styles.detailCard}>
+          <p className={styles.sectionTitle}>Pontos para revisar</p>
+          <div className={styles.topics}>
             {summary.weakTopics.length > 0 ? (
               summary.weakTopics.map((topic) => (
-                <span key={topic} className="rounded-full bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700">
+                <span key={topic} className={styles.weakTopic}>
                   {topic}
                 </span>
               ))
             ) : (
-              <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
+              <span className={styles.clearTopic}>
                 Nenhum ponto ficou muito frágil nesta rodada
               </span>
             )}
           </div>
         </div>
 
-        <div className="rounded-[1.75rem] bg-white/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <div className="flex items-center gap-3">
-            <Sparkles className="h-5 w-5 text-cyan-600" />
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">Próximos passos</p>
+        <div className={styles.detailCard}>
+          <div className={styles.recommendationHeader}>
+            <Sparkles className={styles.recommendationIcon} />
+            <p className={styles.sectionTitle}>Próximos passos</p>
           </div>
-          <div className="mt-4 space-y-3">
+          <div className={styles.recommendations}>
             {summary.recommendations.map((recommendation) => (
-              <div key={recommendation} className="flex items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                <ArrowRight className="mt-1 h-4 w-4 flex-none text-cyan-600" />
+              <div key={recommendation} className={styles.recommendationItem}>
+                <ArrowRight className={styles.recommendationArrow} />
                 {recommendation}
               </div>
             ))}
@@ -96,35 +97,19 @@ export function QuizResultSummary({
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-        <button
-          type="button"
-          onClick={onBackToModes}
-          className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:bg-slate-800"
-        >
-          <ArrowRight className="h-4 w-4" />
+      <div className={styles.actions}>
+        <button type="button" onClick={onBackToModes} className={styles.primaryButton}>
+          <ArrowRight className={styles.actionIcon} />
           Tentar outro modo com este material
         </button>
-        <button
-          type="button"
-          onClick={onRestartSameMode}
-          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-        >
-          <RotateCcw className="h-4 w-4" />
+        <button type="button" onClick={onRestartSameMode} className={styles.secondaryButton}>
+          <RotateCcw className={styles.actionIcon} />
           Refazer este questionário
         </button>
-        <button
-          type="button"
-          onClick={onBackToModes}
-          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-        >
+        <button type="button" onClick={onBackToModes} className={styles.secondaryButton}>
           Voltar aos modos de estudo
         </button>
-        <button
-          type="button"
-          onClick={onStartOver}
-          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-        >
+        <button type="button" onClick={onStartOver} className={styles.secondaryButton}>
           Estudar outro material
         </button>
       </div>

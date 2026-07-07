@@ -4,7 +4,8 @@ import { useDeferredValue, useState } from "react";
 import { FileText, Upload } from "lucide-react";
 
 import type { IngestDocumentResponse } from "@/lib/types";
-import { cn, getUnsupportedFileMessage } from "@/lib/utils";
+import { getUnsupportedFileMessage } from "@/lib/utils";
+import { uploadStudyMaterialStyles as styles } from "./UploadStudyMaterial.styles";
 
 interface UploadStudyMaterialProps {
   isPending: boolean;
@@ -71,73 +72,63 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="space-y-2">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-900">Envie um questionário pronto</h2>
-        <p className="text-sm text-slate-600">Cole perguntas e respostas ou envie um arquivo estruturado para estudar.</p>
+    <form onSubmit={handleSubmit} className={styles.form}>
+      <div className={styles.intro}>
+        <h2 className={styles.title}>Envie um questionário pronto</h2>
+        <p className={styles.description}>Cole perguntas e respostas ou envie um arquivo estruturado para estudar.</p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className={styles.modeButtons}>
         <button
           type="button"
           onClick={() => setInputMode("text")}
-          className={cn(
-            "rounded-full px-4 py-2 text-sm font-semibold transition",
-            inputMode === "text"
-              ? "bg-slate-900 text-white shadow-lg shadow-slate-900/20"
-              : "bg-white/70 text-slate-600 hover:bg-white",
-          )}
+          className={styles.modeButton({ active: inputMode === "text" })}
         >
           Colar questionário
         </button>
         <button
           type="button"
           onClick={() => setInputMode("file")}
-          className={cn(
-            "rounded-full px-4 py-2 text-sm font-semibold transition",
-            inputMode === "file"
-              ? "bg-slate-900 text-white shadow-lg shadow-slate-900/20"
-              : "bg-white/70 text-slate-600 hover:bg-white",
-          )}
+          className={styles.modeButton({ active: inputMode === "file" })}
         >
           Enviar arquivo
         </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
-        <label className="space-y-2">
-          <span className="text-sm font-semibold text-slate-700">Nome do material (opcional)</span>
+      <div className={styles.metadataGrid}>
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>Nome do material (opcional)</span>
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Ex.: Revisão de microbiologia"
-            className="w-full rounded-3xl border border-white/70 bg-white/80 px-5 py-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+            className={styles.titleInput}
           />
         </label>
 
-        <div className="rounded-3xl border border-white/70 bg-white/65 px-5 py-4 shadow-sm">
-          <p className="text-sm font-semibold text-slate-700">Formatos aceitos</p>
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            Texto colado ou upload de <span className="font-semibold text-slate-700">.txt</span>,{" "}
-            <span className="font-semibold text-slate-700">.pdf</span> e{" "}
-            <span className="font-semibold text-slate-700">.docx</span>, desde que o conteúdo já esteja em formato de perguntas e respostas.
+        <div className={styles.formatsCard}>
+          <p className={styles.formatsTitle}>Formatos aceitos</p>
+          <p className={styles.formatsText}>
+            Texto colado ou upload de <span className={styles.formatName}>.txt</span>,{" "}
+            <span className={styles.formatName}>.pdf</span> e{" "}
+            <span className={styles.formatName}>.docx</span>, desde que o conteúdo já esteja em formato de perguntas e respostas.
           </p>
         </div>
       </div>
 
       {inputMode === "text" ? (
-        <div className="rounded-[2rem] border border-white/70 bg-white/75 p-4 shadow-[0_25px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-2 pb-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-100 text-cyan-700">
-                <FileText className="h-5 w-5" />
+        <div className={styles.textPanel}>
+          <div className={styles.textPanelHeader}>
+            <div className={styles.textPanelIntro}>
+              <div className={styles.textIconWrapper}>
+                <FileText className={styles.textIcon} />
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-800">Cole o questionário</p>
-                <p className="text-xs text-slate-500">Ex.: `1. Pergunta?` + `Resposta:` + texto da resposta.</p>
+                <p className={styles.textPanelTitle}>Cole o questionário</p>
+                <p className={styles.textPanelHint}>Ex.: `1. Pergunta?` + `Resposta:` + texto da resposta.</p>
               </div>
             </div>
-            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+            <div className={styles.wordCountBadge}>
               {wordCount} palavras
             </div>
           </div>
@@ -146,45 +137,39 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
             value={manualText}
             onChange={(event) => setManualText(event.target.value)}
             placeholder={"1. O que é fotossíntese?\nResposta:\nProcesso em que...\n\n2. Quais são as etapas?\nResposta:\n..."}
-            className="mt-4 min-h-72 w-full resize-none rounded-[1.5rem] border border-slate-100 bg-white px-5 py-4 text-sm leading-7 text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+            className={styles.manualTextarea}
           />
         </div>
       ) : (
-        <label className="block cursor-pointer rounded-[2rem] border border-dashed border-cyan-200 bg-white/75 p-6 shadow-[0_25px_80px_rgba(15,23,42,0.08)] transition hover:border-cyan-400 hover:bg-white">
+        <label className={styles.fileDrop}>
           <input
             type="file"
             accept=".txt,text/plain,.pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            className="hidden"
+            className={styles.hiddenInput}
             onChange={(event) => handleFileChange(event.target.files?.[0] ?? null)}
           />
-          <div className="flex flex-col items-center justify-center gap-4 py-10 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-[1.5rem] bg-slate-900 text-white shadow-lg shadow-slate-900/20">
-              <Upload className="h-7 w-7" />
+          <div className={styles.fileDropContent}>
+            <div className={styles.uploadIconWrapper}>
+              <Upload className={styles.uploadIcon} />
             </div>
-            <div className="space-y-2">
-              <p className="text-base font-semibold text-slate-800">{file ? file.name : "Escolha um arquivo"}</p>
-              <p className="text-sm text-slate-500">Use um arquivo que já contenha perguntas e respostas.</p>
+            <div className={styles.fileDetails}>
+              <p className={styles.fileName}>{file ? file.name : "Escolha um arquivo"}</p>
+              <p className={styles.fileHint}>Use um arquivo que já contenha perguntas e respostas.</p>
             </div>
-            <div className="rounded-full bg-cyan-50 px-4 py-2 text-xs font-semibold text-cyan-700">
+            <div className={styles.supportedBadge}>
               Formatos suportados: TXT, PDF e DOCX
             </div>
           </div>
         </label>
       )}
 
-      {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
-      ) : null}
+      {error ? <div className={styles.error}>{error}</div> : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-500">
+      <div className={styles.footer}>
+        <div className={styles.footerNote}>
           Vamos validar se o conteúdo está em formato de perguntas e respostas antes de iniciar.
         </div>
-        <button
-          type="submit"
-          disabled={pending}
-          className="inline-flex items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70"
-        >
+        <button type="submit" disabled={pending} className={styles.submitButton}>
           {pending ? "Validando questionário..." : "Continuar"}
         </button>
       </div>

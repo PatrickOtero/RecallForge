@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { cleanExtractedText } from "@/lib/normalization/text-normalizer";
+import { computeStudyBankCapabilities, parseMatchingQuestionDrafts } from "@/lib/quiz-parser";
+import { getAvailableModes } from "@/lib/quiz-session/mode-compatibility";
 import {
   detectStructuredQuestionnaire,
   generateQuizFromDocument,
@@ -222,7 +224,7 @@ test("transforma associacao item/resposta em uma questao MATCHING", () => {
   const matching = review.questions.find((question) => question.type === "MATCHING");
 
   assert.ok(matching);
-  assert.equal(matching?.prompt, "Associe cada item a descricao correta.");
+  assert.equal(matching?.prompt, "Associe cada item à descrição correta.");
   assert.equal(matching?.matchingPairs?.length, 2);
   assert.deepEqual(
     matching?.matchingPairs?.map((pair) => pair.left),
@@ -260,7 +262,88 @@ test("parseia associacao em colunas com gabarito", () => {
   assert.equal(matching?.matchingPairs?.find((pair) => pair.left === "Château-Chalon")?.right, "Denominacao do Jura dedicada ao Vin Jaune.");
 });
 
-test("parseia frente/verso e termo/definicao como revelar resposta quando ha volume minimo", () => {
+test("parseia associacao explicita com pares em seta", () => {
+  const drafts = parseMatchingQuestionDrafts(`
+  [ASSOCIACAO]
+  Instrucao: Associe cada item a descricao correta.
+  1. Provence => Lider francesa e mundial em roses secos e frutados.
+  2. Roussillon => Regiao associada a producao de VDN.
+  `);
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.type, "MATCHING");
+  assert.equal(drafts[0]?.matchingPairs?.length, 2);
+  assert.deepEqual(drafts[0]?.matchingPairs?.map((pair) => pair.left), ["Provence", "Roussillon"]);
+});
+
+test("parseia associacao explicita com pares em hifen", () => {
+  const drafts = parseMatchingQuestionDrafts(`
+  [ASSOCIAÇÃO]
+  1. Provence - Lider francesa e mundial em roses secos e frutados.
+  2. Roussillon - Regiao associada a producao de VDN.
+  `);
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.type, "MATCHING");
+  assert.equal(drafts[0]?.matchingPairs?.length, 2);
+});
+
+test("parseia associacao explicita com item e resposta", () => {
+  const drafts = parseMatchingQuestionDrafts(`
+  [ASSOCIACAO]
+  1. Provence
+  Resposta: Lider francesa e mundial em roses secos e frutados.
+
+  2. Roussillon
+  Resposta: Regiao associada a producao de VDN.
+  `);
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.type, "MATCHING");
+  assert.equal(drafts[0]?.matchingPairs?.length, 2);
+  assert.equal(drafts[0]?.matchingPairs?.[0]?.right.includes("Resposta:"), false);
+});
+
+test("parseia associacao explicita em colunas com gabarito", () => {
+  const drafts = parseMatchingQuestionDrafts(`
+  [ASSOCIACAO]
+  Coluna A
+  A) Provence
+  B) Roussillon
+
+  Coluna B
+  1) Regiao associada a producao de VDN.
+  2) Lider francesa e mundial em roses secos e frutados.
+
+  Gabarito:
+  A-2
+  B-1
+  `);
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.type, "MATCHING");
+  assert.equal(drafts[0]?.matchingPairs?.length, 2);
+  assert.equal(
+    drafts[0]?.matchingPairs?.find((pair) => pair.left === "Provence")?.right,
+    "Lider francesa e mundial em roses secos e frutados.",
+  );
+});
+
+test("capabilities habilitam e bloqueiam modos por tipo disponivel", () => {
+  const matchingOnly = computeStudyBankCapabilities(parseMatchingQuestionDrafts(`
+  [ASSOCIACAO]
+  1. Provence => Lider francesa e mundial em roses secos e frutados.
+  2. Roussillon => Regiao associada a producao de VDN.
+  `));
+  const modes = getAvailableModes(matchingOnly);
+
+  assert.equal(matchingOnly.matching, 1);
+  assert.equal(modes.find((mode) => mode.mode === "FLASHCARDS")?.available, true);
+  assert.equal(modes.find((mode) => mode.mode === "EXAM")?.available, false);
+  assert.equal(modes.find((mode) => mode.mode === "DEEP_DIVE")?.available, false);
+});
+
+test("parseia frente/verso e termo/definicao como itens revelaveis quando ha volume minimo", () => {
   const cleanedText = cleanExtractedText(`
   Frente: Ruptura
   Verso: Falta de produto no momento da compra pelo consumidor.
@@ -278,7 +361,7 @@ test("parseia frente/verso e termo/definicao como revelar resposta quando ha vol
 
   const reveal = generateQuizFromDocument(buildDocument(cleanedText), "FEYNMAN");
   assert.equal(reveal.questions.length, 3);
-  assert.ok(reveal.questions.every((question) => question.type === "REVEAL_ANSWER"));
+  assert.ok(reveal.questions.every((question) => question.type === "FLASHCARD" || question.type === "REVEAL_ANSWER"));
   assert.ok(findQuestion(reveal.questions, "Gewurztraminer"));
   assert.ok(reveal.questions.some((question) => question.prompt === "São João"));
 });

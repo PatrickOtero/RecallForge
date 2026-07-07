@@ -57,6 +57,7 @@ export interface QuizModeOption {
   emphasis: string[];
   immediateFeedback: boolean;
   compositionOptions: QuizCompositionOption[];
+  available: boolean;
   unavailableMessage?: string;
 }
 

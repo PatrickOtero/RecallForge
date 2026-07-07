@@ -16,6 +16,7 @@ import type {
   QuizResultSummary as QuizSummary,
   QuizSession,
 } from "@/lib/types";
+import { studyWorkspaceStyles as styles } from "./StudyWorkspace.styles";
 
 export function StudyWorkspace() {
   const router = useRouter();
@@ -104,26 +105,22 @@ export function StudyWorkspace() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-5xl space-y-6">
-      <div className="rounded-[2rem] border border-white/70 bg-white/70 px-6 py-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">RecallForge</h1>
-        <p className="mt-2 text-sm text-slate-600">
+    <section className={styles.root}>
+      <div className={styles.headerCard}>
+        <h1 className={styles.title}>RecallForge</h1>
+        <p className={styles.subtitle}>
           Transforme um questionário pronto em estudo interativo.
         </p>
       </div>
 
-      <div className="rounded-[2.25rem] border border-white/70 bg-white/70 p-6 shadow-[0_35px_120px_rgba(15,23,42,0.10)] backdrop-blur md:p-8">
+      <div className={styles.shell}>
         {step === "input" ? (
           <UploadStudyMaterial isPending={isAnalysisPending} onSuccess={handleAnalyzeSuccess} />
         ) : null}
 
         {step === "modes" && document ? (
-          <div className="space-y-4">
-            {flowError ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {flowError}
-              </div>
-            ) : null}
+          <div className={styles.modeStep}>
+            {flowError ? <div className={styles.error}>{flowError}</div> : null}
             <QuizModeSelector
               document={document}
               options={options}

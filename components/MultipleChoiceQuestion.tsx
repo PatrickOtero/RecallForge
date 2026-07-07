@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import type { AnswerAttempt, Question } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { multipleChoiceQuestionStyles as styles } from "./MultipleChoiceQuestion.styles";
 
 interface MultipleChoiceQuestionProps {
   attempt?: AnswerAttempt;
@@ -21,8 +21,8 @@ export function MultipleChoiceQuestion({
   const [selected, setSelected] = useState(attempt?.responseText ?? "");
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3">
+    <div className={styles.root}>
+      <div className={styles.choices}>
         {question.choices?.map((choice) => {
           const active = selected === choice.label;
 
@@ -32,13 +32,7 @@ export function MultipleChoiceQuestion({
               type="button"
               disabled={disabled}
               onClick={() => setSelected(choice.label)}
-              className={cn(
-                "rounded-3xl border px-4 py-4 text-left text-sm font-medium transition",
-                active
-                  ? "border-cyan-400 bg-cyan-50 text-slate-900"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50",
-                disabled && "cursor-not-allowed opacity-80",
-              )}
+              className={styles.choiceButton({ active, disabled })}
             >
               {choice.label}
             </button>
@@ -51,7 +45,7 @@ export function MultipleChoiceQuestion({
           type="button"
           disabled={disabled || !selected}
           onClick={() => onSubmit(selected)}
-          className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className={styles.submitButton}
         >
           Confirmar resposta
         </button>

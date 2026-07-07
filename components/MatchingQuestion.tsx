@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { AnswerAttempt, Question } from "@/lib/types";
+import { matchingQuestionStyles as styles } from "./MatchingQuestion.styles";
 
 interface MatchingQuestionProps {
   attempt?: AnswerAttempt;
@@ -50,24 +51,21 @@ export function MatchingQuestion({ attempt, disabled, onSubmit, question }: Matc
   }
 
   return (
-    <div className="space-y-5">
-      <div className="grid gap-3">
+    <div className={styles.root}>
+      <div className={styles.pairs}>
         {pairs.map((pair) => {
           const currentValue = selected[pair.id] ?? "";
           const isCorrect = attempt ? currentValue === pair.right : null;
 
           return (
-            <div
-              key={pair.id}
-              className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)] md:items-center"
-            >
-              <div className="text-sm font-semibold leading-6 text-slate-800">{pair.left}</div>
-              <div className="space-y-2">
+            <div key={pair.id} className={styles.pairRow}>
+              <div className={styles.pairLabel}>{pair.left}</div>
+              <div className={styles.controls}>
                 <select
                   value={currentValue}
                   disabled={disabled}
                   onChange={(event) => updateSelection(pair.id, event.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-80"
+                  className={styles.select}
                 >
                   <option value="">Escolha a associação</option>
                   {options.map((option) => (
@@ -82,7 +80,7 @@ export function MatchingQuestion({ attempt, disabled, onSubmit, question }: Matc
                 </select>
 
                 {attempt ? (
-                  <p className={isCorrect ? "text-sm font-medium text-emerald-700" : "text-sm font-medium text-rose-700"}>
+                  <p className={styles.feedback(Boolean(isCorrect))}>
                     {isCorrect ? "Correto" : `Correto: ${pair.right}`}
                   </p>
                 ) : null}
@@ -93,12 +91,12 @@ export function MatchingQuestion({ attempt, disabled, onSubmit, question }: Matc
       </div>
 
       {!attempt ? (
-        <div className="flex flex-wrap gap-3">
+        <div className={styles.actions}>
           <button
             type="button"
             disabled={disabled || !complete}
             onClick={() => onSubmit(JSON.stringify(selected))}
-            className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className={styles.submitButton}
           >
             Confirmar associações
           </button>
@@ -106,7 +104,7 @@ export function MatchingQuestion({ attempt, disabled, onSubmit, question }: Matc
             type="button"
             disabled={disabled}
             onClick={() => setSelected({})}
-            className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className={styles.clearButton}
           >
             Limpar
           </button>

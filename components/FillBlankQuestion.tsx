@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { AnswerAttempt } from "@/lib/types";
+import { fillBlankQuestionStyles as styles } from "./FillBlankQuestion.styles";
 
 interface FillBlankQuestionProps {
   attempt?: AnswerAttempt;
@@ -14,13 +15,13 @@ export function FillBlankQuestion({ attempt, disabled, onSubmit }: FillBlankQues
   const [value, setValue] = useState(attempt?.responseText ?? "");
 
   return (
-    <div className="space-y-4">
+    <div className={styles.root}>
       <input
         value={value}
         disabled={disabled}
         onChange={(event) => setValue(event.target.value)}
         placeholder="Digite a palavra ou expressão que completa a ideia."
-        className="w-full rounded-3xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-80"
+        className={styles.input}
       />
 
       {!attempt ? (
@@ -28,7 +29,7 @@ export function FillBlankQuestion({ attempt, disabled, onSubmit }: FillBlankQues
           type="button"
           disabled={disabled || !value.trim()}
           onClick={() => onSubmit(value)}
-          className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className={styles.submitButton}
         >
           Conferir resposta
         </button>
