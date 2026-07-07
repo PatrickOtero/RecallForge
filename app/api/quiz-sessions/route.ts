@@ -1,15 +1,40 @@
 import { prisma } from "@/lib/prisma";
 import {
+  detectStructuredQuestionnaire,
   generateQuizFromDocument,
   getMinimumQuestionTarget,
-  MINIMUM_STRUCTURED_QUESTION_PAIRS,
-  parseStructuredQuestionnaire,
+  getUnavailableModeMessage,
 } from "@/lib/quiz/mock-quiz-generator";
 import { serializeDocument, serializeQuizSession } from "@/lib/serializers";
+import type { QuestionType } from "@/lib/types";
 import { serializeQuestionConfig } from "@/lib/utils";
 import { isQuizComposition, isQuizMode, resolveQuizComposition } from "@/lib/validation";
 
 export const runtime = "nodejs";
+
+type StoredQuestionType = "MULTIPLE_CHOICE" | "TRUE_FALSE" | "FILL_BLANK" | "SHORT_ANSWER" | "FLASHCARD";
+
+function toStoredQuestionType(type: QuestionType): StoredQuestionType {
+  if (type === "REVEAL_ANSWER") {
+    return "FLASHCARD";
+  }
+
+  if (type === "MATCHING") {
+    return "MULTIPLE_CHOICE";
+  }
+
+  return type;
+}
+
+function invalidQuestionnaireResponse() {
+  return Response.json(
+    {
+      error:
+        "Este material não parece estar em formato de questionário. O RecallForge trabalha com questionários prontos. Envie perguntas e respostas, alternativas com gabarito, verdadeiro/falso, associação ou pares de frente e verso.",
+    },
+    { status: 400 },
+  );
+}
 
 export async function POST(request: Request) {
   const body = (await request.json()) as {
@@ -37,26 +62,9 @@ export async function POST(request: Request) {
   }
 
   const document = serializeDocument(existingDocument);
-  const structuredQuestions = parseStructuredQuestionnaire(document.cleanedText);
 
-  if (structuredQuestions.length === 0) {
-    return Response.json(
-      {
-        error:
-          "Este material não parece estar em formato de perguntas e respostas. O RecallForge trabalha com questionários prontos. Reestruture o conteúdo usando P:/R: ou Pergunta:/Resposta: e tente novamente.",
-      },
-      { status: 400 },
-    );
-  }
-
-  if (structuredQuestions.length < MINIMUM_STRUCTURED_QUESTION_PAIRS) {
-    return Response.json(
-      {
-        error:
-          "Não encontrei perguntas e respostas suficientes neste material. Envie um arquivo estruturado com perguntas e respostas.",
-      },
-      { status: 400 },
-    );
+  if (!detectStructuredQuestionnaire(document.cleanedText)) {
+    return invalidQuestionnaireResponse();
   }
 
   const composition = resolveQuizComposition(body.mode, requestedComposition);
@@ -64,7 +72,7 @@ export async function POST(request: Request) {
   if (generated.questions.length === 0) {
     return Response.json(
       {
-        error: "Não encontrei perguntas suficientes para esse modo neste questionário. Tente outro modo de estudo.",
+        error: getUnavailableModeMessage(body.mode),
       },
       { status: 400 },
     );
@@ -73,7 +81,9 @@ export async function POST(request: Request) {
   const targetCount = getMinimumQuestionTarget(body.mode);
   const generationNote =
     generated.questions.length < targetCount
-      ? `Este questionário oferece ${generated.questions.length} ${generated.questions.length === 1 ? "pergunta útil" : "perguntas úteis"} neste modo. Mantivemos apenas o que tinha pares confiáveis no arquivo.`
+      ? `Este questionário oferece ${generated.questions.length} ${
+          generated.questions.length === 1 ? "pergunta útil" : "perguntas úteis"
+        } neste modo. Mantivemos apenas o que tinha pares confiáveis no arquivo.`
       : undefined;
 
   const session = await prisma.quizSession.create({
@@ -84,12 +94,15 @@ export async function POST(request: Request) {
       questionCount: generated.questions.length,
       questions: {
         create: generated.questions.map((question, index) => ({
-          type: question.type,
+          type: toStoredQuestionType(question.type),
           position: index + 1,
           prompt: question.prompt,
           topic: question.topic,
           choicesJson: serializeQuestionConfig({
             choices: question.choices,
+            matchingPairs: question.matchingPairs,
+            presentationType:
+              question.type === "MATCHING" || question.type === "REVEAL_ANSWER" ? question.type : undefined,
             responseFormat: question.responseFormat,
           }),
           correctAnswer: question.correctAnswer ?? null,

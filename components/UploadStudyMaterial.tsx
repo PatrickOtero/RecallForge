@@ -177,7 +177,9 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
       ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-500">Vamos validar se o conteúdo está em formato de perguntas e respostas antes de iniciar.</div>
+        <div className="text-sm text-slate-500">
+          Vamos validar se o conteúdo está em formato de perguntas e respostas antes de iniciar.
+        </div>
         <button
           type="submit"
           disabled={pending}

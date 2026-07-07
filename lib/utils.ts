@@ -1,5 +1,6 @@
 import type {
   DocumentSource,
+  MatchingPair,
   QuestionChoice,
   QuestionResponseFormat,
   QuestionType,
@@ -83,49 +84,88 @@ export function safeJsonParse<T>(value: string | null | undefined, fallback: T):
 
 export function serializeQuestionConfig({
   choices,
+  matchingPairs,
+  presentationType,
   responseFormat,
 }: {
   choices?: QuestionChoice[];
+  matchingPairs?: MatchingPair[];
+  presentationType?: QuestionType;
   responseFormat?: QuestionResponseFormat;
 }) {
-  if ((!choices || choices.length === 0) && !responseFormat) {
+  if (
+    (!choices || choices.length === 0) &&
+    (!matchingPairs || matchingPairs.length === 0) &&
+    !presentationType &&
+    !responseFormat
+  ) {
     return null;
   }
 
   return JSON.stringify({
     choices: choices ?? [],
+    matchingPairs: matchingPairs ?? [],
+    presentationType,
     responseFormat,
   });
 }
 
 export function parseQuestionConfig(
   value: string | null | undefined,
-): { choices: QuestionChoice[]; responseFormat?: QuestionResponseFormat } {
+): {
+  choices: QuestionChoice[];
+  matchingPairs: MatchingPair[];
+  presentationType?: QuestionType;
+  responseFormat?: QuestionResponseFormat;
+} {
   const parsed = safeJsonParse<unknown>(value, null);
 
   if (Array.isArray(parsed)) {
     return {
       choices: parsed as QuestionChoice[],
-      responseFormat: undefined as QuestionResponseFormat | undefined,
+      matchingPairs: [],
+      presentationType: undefined,
+      responseFormat: undefined,
     };
   }
 
   if (!parsed || typeof parsed !== "object") {
     return {
-      choices: [] as QuestionChoice[],
-      responseFormat: undefined as QuestionResponseFormat | undefined,
+      choices: [],
+      matchingPairs: [],
+      presentationType: undefined,
+      responseFormat: undefined,
     };
   }
 
   const maybeChoices = "choices" in parsed ? (parsed as { choices?: unknown }).choices : [];
+  const maybeMatchingPairs =
+    "matchingPairs" in parsed ? (parsed as { matchingPairs?: unknown }).matchingPairs : [];
+  const maybePresentationType =
+    "presentationType" in parsed ? (parsed as { presentationType?: unknown }).presentationType : undefined;
   const maybeResponseFormat =
     "responseFormat" in parsed ? (parsed as { responseFormat?: unknown }).responseFormat : undefined;
 
+  const allowedQuestionTypes: QuestionType[] = [
+    "MULTIPLE_CHOICE",
+    "TRUE_FALSE",
+    "FILL_BLANK",
+    "SHORT_ANSWER",
+    "FLASHCARD",
+    "REVEAL_ANSWER",
+    "MATCHING",
+  ];
+  const presentationType: QuestionType | undefined =
+    typeof maybePresentationType === "string" && allowedQuestionTypes.includes(maybePresentationType as QuestionType)
+      ? (maybePresentationType as QuestionType)
+      : undefined;
   const responseFormat: QuestionResponseFormat | undefined =
     maybeResponseFormat === "SHORT" || maybeResponseFormat === "LONG" ? maybeResponseFormat : undefined;
 
   return {
     choices: Array.isArray(maybeChoices) ? (maybeChoices as QuestionChoice[]) : [],
+    matchingPairs: Array.isArray(maybeMatchingPairs) ? (maybeMatchingPairs as MatchingPair[]) : [],
+    presentationType,
     responseFormat,
   };
 }
@@ -137,15 +177,15 @@ export function roundScore(value: number) {
 export function getQuizModeLabel(mode: QuizMode) {
   switch (mode) {
     case "QUICK_REVIEW":
-      return "Revisão rápida";
+      return "Revisão geral";
     case "DEEP_DIVE":
-      return "Questionário profundo";
+      return "Múltipla escolha";
     case "EXAM":
-      return "Modo prova";
+      return "Verdadeiro/Falso";
     case "FEYNMAN":
-      return "Modo Feynman";
+      return "Revelar resposta";
     case "FLASHCARDS":
-      return "Flashcards";
+      return "Associação";
   }
 }
 
@@ -154,19 +194,22 @@ export function getQuestionTypeLabel(type: QuestionType) {
     case "MULTIPLE_CHOICE":
       return "Múltipla escolha";
     case "TRUE_FALSE":
-      return "Verdadeiro ou falso";
+      return "Verdadeiro/Falso";
     case "FILL_BLANK":
       return "Completar lacuna";
     case "SHORT_ANSWER":
-      return "Resposta curta";
+    case "REVEAL_ANSWER":
+      return "Revelar resposta";
     case "FLASHCARD":
-      return "Flashcard";
+      return "Revelar resposta";
+    case "MATCHING":
+      return "Associação";
   }
 }
 
 export function getQuestionPresentationLabel(type: QuestionType, responseFormat?: QuestionResponseFormat) {
-  if (type === "SHORT_ANSWER" && responseFormat === "LONG") {
-    return "Resposta discursiva";
+  if (type === "SHORT_ANSWER" || type === "REVEAL_ANSWER" || type === "FLASHCARD") {
+    return responseFormat === "LONG" ? "Revelar resposta" : "Revelar resposta";
   }
 
   return getQuestionTypeLabel(type);
@@ -175,11 +218,11 @@ export function getQuestionPresentationLabel(type: QuestionType, responseFormat?
 export function getQuizCompositionLabel(composition: QuizComposition) {
   switch (composition) {
     case "AUTO":
-      return "Misto automático";
+      return "Revisão geral";
     case "MULTIPLE_CHOICE_ONLY":
-      return "Apenas múltipla escolha";
+      return "Múltipla escolha";
     case "DISCURSIVE_ONLY":
-      return "Apenas discursivas";
+      return "Revelar resposta";
   }
 }
 

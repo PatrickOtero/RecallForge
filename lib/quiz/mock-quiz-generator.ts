@@ -15,6 +15,7 @@ import {
 import {
   buildPromptSignature,
   conceptSimilarity,
+  extractConceptTokens,
   extractReferenceKeywords,
   uniqueConceptTokens,
 } from "@/lib/quiz/concept-utils";
@@ -47,6 +48,7 @@ interface KnowledgeUnit {
 interface DocumentAnalysis {
   emphasis: string[];
   sections: TextSection[];
+  structuredDrafts: QuestionDraft[];
   units: KnowledgeUnit[];
   structuredQuestions: ParsedStructuredQuestion[];
 }
@@ -60,6 +62,17 @@ type StructuredPromptStyle = "QUESTION" | "TRUE_FALSE" | "ASSOCIATION" | "FLASHC
 
 type StructuredSectionKind = "DEFAULT" | "ASSOCIATION";
 
+type StructuredQuestionAnswerKind =
+  | "definition"
+  | "reason"
+  | "procedure"
+  | "formula"
+  | "list"
+  | "association"
+  | "true_false"
+  | "numeric_case"
+  | "rule";
+
 export interface ParsedStructuredQuestion {
   prompt: string;
   expectedAnswer: string;
@@ -69,8 +82,14 @@ export interface ParsedStructuredQuestion {
   sectionTitle: string;
   sectionIndex: number;
   promptStyle: StructuredPromptStyle;
+  answerKind: StructuredQuestionAnswerKind;
   associationGroup?: string;
   associationItem?: string;
+}
+
+interface StructuredDistractorCandidate {
+  expectedAnswer: string;
+  score: number;
 }
 
 interface WorkingStructuredQuestion {
@@ -86,19 +105,54 @@ interface WorkingStructuredQuestion {
 
 const targetQuestionCounts: Record<QuizMode, number> = {
   QUICK_REVIEW: 10,
-  DEEP_DIVE: 15,
-  EXAM: 20,
-  FEYNMAN: 8,
-  FLASHCARDS: 20,
+  DEEP_DIVE: 10,
+  EXAM: 10,
+  FEYNMAN: 10,
+  FLASHCARDS: 8,
 };
 
 const compositionLabels: Record<QuizComposition, string> = {
-  AUTO: "Misto automático",
-  MULTIPLE_CHOICE_ONLY: "Apenas múltipla escolha",
-  DISCURSIVE_ONLY: "Apenas discursivas",
+  AUTO: "Revisão geral",
+  MULTIPLE_CHOICE_ONLY: "Múltipla escolha",
+  DISCURSIVE_ONLY: "Revelar resposta",
 };
 
 export const MINIMUM_STRUCTURED_QUESTION_PAIRS = 3;
+
+function getModeUnavailableMessage(mode: QuizMode) {
+  switch (mode) {
+    case "DEEP_DIVE":
+      return "Não há questões suficientes para múltipla escolha com alternativas plausíveis.";
+    case "EXAM":
+      return "Este questionário não possui questões de verdadeiro/falso reconhecíveis.";
+    case "FLASHCARDS":
+      return "Este questionário não possui blocos de associação reconhecíveis.";
+    case "FEYNMAN":
+      return "Este questionário não possui perguntas com resposta reconhecível para revelar.";
+    case "QUICK_REVIEW":
+      return "Este questionário não possui tipos suficientes para montar uma revisão geral.";
+  }
+}
+
+function getModeQuestionTypes(mode: QuizMode, questions: QuestionDraft[]) {
+  if (mode === "QUICK_REVIEW") {
+    return [...new Set(questions.map((question) => question.type))];
+  }
+
+  if (mode === "DEEP_DIVE") {
+    return ["MULTIPLE_CHOICE"] satisfies QuestionDraft["type"][];
+  }
+
+  if (mode === "EXAM") {
+    return ["TRUE_FALSE"] satisfies QuestionDraft["type"][];
+  }
+
+  if (mode === "FLASHCARDS") {
+    return ["MATCHING"] satisfies QuestionDraft["type"][];
+  }
+
+  return ["REVEAL_ANSWER"] satisfies QuestionDraft["type"][];
+}
 
 const rawTopicWhitelist = new Set(
   [
@@ -160,7 +214,7 @@ const systemNoiseMatcher =
 const brokenSymbolMatcher = /(?:\u00e2\u02c6\u0192|\u00e2\u2030\u00a1|\u00ef\u00bf\u00be)/u;
 const separatorLineMatcher = /^[-_=]{6,}$/;
 const structuredSectionMatcher =
-  /^(?:\[\s*(.+?)\s*\]|(?:bloco|modulo|m[o?]dulo|tema|cap[i?]tulo|sec[a?]o|se[c?][a?]o)\s*\d*\s*[-??:]?\s+(.+))$/i;
+  /^(?:#{1,6}\s+(.+?)\s*|={3,}\s*(.+?)\s*={3,}|\[\s*(.+?)\s*\]|(?:bloco|modulo|m[o\u00f3]dulo|tema|cap[i\u00ed]tulo|sec[a\u00e3]o|se[c\u00e7][a\u00e3]o|aula)\s*\d*\s*[-:\u2013\u2014]?\s+(.+))$/iu;
 const structuredAnswerMatcher =
   /^(?:(?:resposta|resposta esperada|gabarito|answer|a|r)\s*[:\-??]\s*)(.*)$/i;
 const structuredQuestionLeadMatcher =
@@ -227,6 +281,7 @@ function sanitizeGeneratedText(text: string) {
 
 function containsBrokenGeneratedText(text: string) {
   const normalized = normalizeForComparison(text);
+  const hasMojibake = /[\u00c3\u00c2][\u0080-\u00bf]|\u00e2[\u0080-\u20ff]/u.test(text);
 
   return (
     /�}~|￾|��|��a|�|====/i.test(text) ||
@@ -238,7 +293,8 @@ function containsBrokenGeneratedText(text: string) {
     normalized.includes("copia autorizada") ||
     normalized.includes("kevin silva") ||
     normalized.includes("nao pode ser distribuido") ||
-    normalized.includes("campo de alteracao")
+    normalized.includes("campo de alteracao") ||
+    hasMojibake
   );
 }
 
@@ -303,7 +359,12 @@ function sanitizeQuestionDraft(question: QuestionDraft): QuestionDraft {
     ...question,
     prompt: sanitizePromptText(question.prompt),
     topic: sanitizeTopicText(question.topic),
-    correctAnswer: question.correctAnswer ? sanitizeAnswerText(question.correctAnswer) : question.correctAnswer,
+    correctAnswer:
+      question.type === "TRUE_FALSE"
+        ? question.correctAnswer
+        : question.correctAnswer
+          ? sanitizeAnswerText(question.correctAnswer)
+          : question.correctAnswer,
     referenceAnswer: question.referenceAnswer ? sanitizeAnswerText(question.referenceAnswer) : question.referenceAnswer,
     rubric: question.rubric ? sanitizeAnswerText(question.rubric) : question.rubric,
     explanation: question.explanation ? sanitizeAnswerText(question.explanation) : question.explanation,
@@ -382,6 +443,86 @@ function classifyKnowledgeUnit(sourceText: string): KnowledgeKind | null {
   }
 
   return null;
+}
+
+function looksLikeListAnswer(value: string) {
+  const cleaned = ensureSentence(value);
+  const normalized = normalizeForComparison(cleaned);
+
+  return (
+    /[;:]/.test(cleaned) ||
+    (cleaned.includes(",") && countWords(cleaned) >= 8) ||
+    /\b(lista|itens|etapas|partes|tipos|componentes|fatores)\b/i.test(normalized)
+  );
+}
+
+function hasProcedureLanguage(value: string) {
+  return /\b(deve|devem|precisa|precisam|primeiro|depois|antes|apos|seguir|executar|realizar|conferir)\b/i.test(
+    normalizeForComparison(value),
+  );
+}
+
+function hasRuleLanguage(value: string) {
+  return /\b(deve|devem|obrigatorio|proibido|nunca|somente|apenas|permitido)\b/i.test(
+    normalizeForComparison(value),
+  );
+}
+
+function isReasonStyleAnswer(value: string) {
+  return /^(porque|pois|devido a|uma vez que|ja que)\b/i.test(normalizeForComparison(value));
+}
+
+function isDefinitionLikeStructuredAnswer(value: string) {
+  return /^e\s+(?:a|o|um|uma)\b/i.test(normalizeForComparison(value)) || /\b(significa|corresponde a|refere se a|consiste em)\b/i.test(normalizeForComparison(value));
+}
+
+function classifyQuestionAnswer(prompt: string, answer: string): StructuredQuestionAnswerKind {
+  const normalizedPrompt = normalizeForComparison(prompt);
+
+  if (/verdadeiro ou falso/.test(normalizedPrompt)) {
+    return "true_false";
+  }
+
+  if (/associe|relacione|\best[aá]?\s+associad/.test(normalizedPrompt)) {
+    return "association";
+  }
+
+  if (/^por que\b|^porque\b/.test(normalizedPrompt) || isReasonStyleAnswer(answer)) {
+    return "reason";
+  }
+
+  if (/=/.test(answer) || /\bformula|indice|calculo\b/i.test(normalizedPrompt)) {
+    return "formula";
+  }
+
+  if (
+    /\b\d+(?:[.,]\d+)?%?\b/.test(answer) &&
+    /\b(quanto|valor|resultado|faixa|percentual|cobertura|dias)\b/i.test(normalizedPrompt)
+  ) {
+    return "numeric_case";
+  }
+
+  if (/^(como|quais sao as etapas|quais sao os passos)\b/.test(normalizedPrompt) || hasProcedureLanguage(answer)) {
+    return "procedure";
+  }
+
+  if (hasRuleLanguage(answer) && !/^como\b/.test(normalizedPrompt)) {
+    return "rule";
+  }
+
+  if (/^(quais|cite|liste|enumere)\b/.test(normalizedPrompt) || looksLikeListAnswer(answer)) {
+    return "list";
+  }
+
+  if (/^(o que e|o que sao|quem e|qual e)\b/.test(normalizedPrompt) || isDefinitionLikeStructuredAnswer(answer)) {
+    return "definition";
+  }
+
+  if (/\b\d+(?:[.,]\d+)?%?\b/.test(answer)) {
+    return "numeric_case";
+  }
+
+  return "procedure";
 }
 
 function countWords(value: string) {
@@ -578,6 +719,15 @@ function sanitizeStructuredLine(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+export function stripQuestionnaireLabel(value: string) {
+  return value
+    .replace(
+      /^(?:p|r|q|a|pergunta|resposta|resposta esperada|gabarito|enunciado|quest[aã]o|frente|verso|termo|defini[cç][aã]o)\s*(?::|\.|-)\s*/iu,
+      "",
+    )
+    .trim();
+}
+
 function isSeparatorLine(value: string) {
   return separatorLineMatcher.test(value);
 }
@@ -597,7 +747,12 @@ function stripStructuredQuestionPrefix(value: string) {
 function detectStructuredPromptStyle(value: string): StructuredPromptStyle {
   const normalized = normalizeForComparison(value);
 
-  if (normalized.startsWith("verdadeiro ou falso")) {
+  if (
+    normalized.startsWith("verdadeiro ou falso") ||
+    normalized.startsWith("certo ou errado") ||
+    normalized.startsWith("v f") ||
+    normalized.startsWith("c e")
+  ) {
     return "TRUE_FALSE";
   }
 
@@ -626,7 +781,7 @@ function getStructuredSectionKind(value: string): StructuredSectionKind {
 
 function normalizeStructuredSectionTitle(value: string) {
   const matched = value.match(structuredSectionMatcher);
-  const raw = trimOuterPunctuation(matched?.[1] ?? matched?.[2] ?? value).replace(/^\[\s*|\s*\]$/g, "");
+  const raw = trimOuterPunctuation(matched?.slice(1).find(Boolean) ?? value).replace(/^\[\s*|\s*\]$/g, "");
   if (!raw) {
     return "Questionário importado";
   }
@@ -734,6 +889,7 @@ function finalizeStructuredQuestion(current: WorkingStructuredQuestion | null) {
     sectionTitle: current.sectionTitle,
     sectionIndex: current.sectionIndex,
     promptStyle: current.promptStyle,
+    answerKind: isAssociation ? "association" : classifyQuestionAnswer(prompt, expectedAnswer),
     associationGroup: current.associationGroup,
     associationItem: isAssociation ? prompt : undefined,
   } satisfies ParsedStructuredQuestion;
@@ -835,7 +991,7 @@ export function parseStructuredQuestionnaire(text: string): ParsedStructuredQues
         answerLines: [],
         sectionTitle,
         sectionIndex,
-        promptStyle: sectionKind === "ASSOCIATION" ? "ASSOCIATION" : detectStructuredPromptStyle(line),
+        promptStyle: sectionKind === "ASSOCIATION" ? "ASSOCIATION" : detectStructuredPromptStyle(stripStructuredQuestionPrefix(line)),
         explicitPromptPrefix: hasExplicitStructuredPromptPrefix(line),
         answerStarted: false,
         associationGroup: sectionKind === "ASSOCIATION" ? `${sectionIndex}:${normalizeForComparison(sectionTitle)}` : undefined,
@@ -861,8 +1017,583 @@ export function parseStructuredQuestionnaire(text: string): ParsedStructuredQues
   return dedupeStructuredQuestions(questions);
 }
 
+function buildDraftId(prefix: string, sourceIndex: number, text: string) {
+  return `${prefix}-${sourceIndex}-${normalizeForComparison(text).slice(0, 48)}`;
+}
+
+function cleanQuestionLine(value: string) {
+  return stripQuestionnaireLabel(value)
+    .replace(/^(?:\d+[\).]\s*|quest[aã]o\s*\d+\s*[:.-]?\s*)/iu, "")
+    .trim();
+}
+
+function parseBooleanAnswer(value: string) {
+  const normalized = normalizeForComparison(value);
+
+  if (/^(v|verdadeiro|c|certo|sim)\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/^(f|falso|e|errado|nao)\b/.test(normalized)) {
+    return false;
+  }
+
+  return null;
+}
+
+function isTrueFalseInstructionLine(value: string) {
+  return /^(?:verdadeiro ou falso|certo ou errado|v\s*f|c\s*e)\s*[:?]?$/i.test(normalizeForComparison(value));
+}
+
+function stripTrueFalsePromptPrefix(value: string) {
+  return cleanQuestionLine(value)
+    .replace(/^(?:verdadeiro ou falso|certo ou errado|v\s*\/?\s*f|c\s*\/?\s*e)\s*[:?-]\s*/iu, "")
+    .replace(/\s+(?:certo ou errado|verdadeiro ou falso)\?\s*$/iu, "")
+    .trim();
+}
+
+function hasTrueFalseStatementVerb(value: string) {
+  const normalized = normalizeForComparison(value);
+
+  return /\b(?:e|eh|sao|significa|corresponde|consiste|refere|serve|permite|visa|ajuda|mede|mostra|indica|representa|gera|resulta|afeta|calcula|deve|devem|consegue|protege|confronta|ignora|possui|tem|fica|esta|ocorre|usa|utiliza|produz|apresenta|inclui|exige|depende|reduz|aumenta|mantem|define|forma|pertence|localiza|compara|envolve|recebe|contem|abrange|caracteriza)\b/i.test(
+    normalized,
+  );
+}
+
+function isCompleteTrueFalseStatement(value: string) {
+  const cleaned = trimOuterPunctuation(stripTrueFalsePromptPrefix(value));
+  const normalized = normalizeForComparison(cleaned);
+
+  if (!cleaned || cleaned.length < 18 || countWords(cleaned) < 5) {
+    return false;
+  }
+
+  if (/[?]$/.test(cleaned) || /^(?:qual|quais|que|o que|como|quando|onde|por que|porque|quem)\b/i.test(normalized)) {
+    return false;
+  }
+
+  if (!hasTrueFalseStatementVerb(cleaned)) {
+    return false;
+  }
+
+  return true;
+}
+
+function parseReadyMultipleChoiceDrafts(text: string) {
+  const lines = text.split(/\r?\n/).map(sanitizeStructuredLine);
+  const drafts: QuestionDraft[] = [];
+  let sectionTitle = "Questionário importado";
+  let sectionIndex = 0;
+  let pendingPrompt = "";
+  let current:
+    | {
+        prompt: string;
+        sectionTitle: string;
+        sectionIndex: number;
+        sourceIndex: number;
+        options: Array<{ id: string; letter: string; text: string; isCorrect: boolean }>;
+        correctLetter?: string;
+      }
+    | null = null;
+
+  function finishCurrent() {
+    if (!current) {
+      return;
+    }
+
+    const correct = current.options.find(
+      (option) => option.isCorrect || option.letter.toLowerCase() === current?.correctLetter?.toLowerCase(),
+    );
+    if (current.prompt && current.options.length >= 2 && correct) {
+      drafts.push({
+        type: "MULTIPLE_CHOICE",
+        prompt: current.prompt,
+        topic: current.sectionTitle,
+        choices: current.options.map((option) => ({ id: option.id, label: option.text })),
+        correctAnswer: correct.text,
+        explanation: correct.text,
+      });
+    }
+
+    current = null;
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line || isSeparatorLine(line)) {
+      finishCurrent();
+      continue;
+    }
+
+    if (isStructuredSectionTitle(line)) {
+      finishCurrent();
+      sectionTitle = normalizeStructuredSectionTitle(line);
+      sectionIndex += 1;
+      pendingPrompt = "";
+      continue;
+    }
+
+    const optionMatch = line.match(/^([A-Ha-h])[\).]\s+(.{1,400})$/);
+    const checkedMatch = line.match(/^\(\s*([xX]?)\s*\)\s+(.{1,400})$/);
+    if (optionMatch || checkedMatch) {
+      if (!current) {
+        const prompt = cleanQuestionLine(pendingPrompt);
+        current = {
+          prompt,
+          sectionTitle,
+          sectionIndex,
+          sourceIndex: index,
+          options: [],
+        };
+      }
+
+      const letter = optionMatch?.[1] ?? String.fromCharCode(65 + current.options.length);
+      const optionText = trimOuterPunctuation(optionMatch?.[2] ?? checkedMatch?.[2] ?? "");
+      current.options.push({
+        id: `${buildDraftId("choice", index, optionText)}-${letter.toLowerCase()}`,
+        letter,
+        text: ensureSentence(optionText),
+        isCorrect: Boolean(checkedMatch?.[1]),
+      });
+      continue;
+    }
+
+    const answerMatch = line.match(/^(?:gabarito|resposta correta|resposta)\s*[:\-]\s*([A-Ha-h])\b/iu);
+    if (answerMatch && current) {
+      current.correctLetter = answerMatch[1];
+      finishCurrent();
+      pendingPrompt = "";
+      continue;
+    }
+
+    if (!current && !/^(?:quest[aã]o\s*\d+|gabarito|resposta correta)\b/iu.test(normalizeForComparison(line))) {
+      pendingPrompt = line;
+    }
+  }
+
+  finishCurrent();
+  return drafts;
+}
+
+function parseReadyTrueFalseDrafts(text: string) {
+  const lines = text.split(/\r?\n/).map(sanitizeStructuredLine);
+  const drafts: QuestionDraft[] = [];
+  let sectionTitle = "Questionário importado";
+  let sectionIndex = 0;
+
+  function add(statement: string, answer: boolean, sourceIndex: number) {
+    const cleanStatement = ensureSentence(stripTrueFalsePromptPrefix(statement.replace(/\((?:v|f|c|e)\)\s*$/iu, "")));
+    if (!isCompleteTrueFalseStatement(cleanStatement)) {
+      return;
+    }
+
+    drafts.push({
+      type: "TRUE_FALSE",
+      prompt: cleanStatement,
+      topic: sectionTitle,
+      correctAnswer: answer ? "true" : "false",
+      explanation: answer ? "Verdadeiro" : "Falso",
+    });
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line || isSeparatorLine(line)) {
+      continue;
+    }
+
+    if (isStructuredSectionTitle(line)) {
+      sectionTitle = normalizeStructuredSectionTitle(line);
+      sectionIndex += 1;
+      continue;
+    }
+
+    const inlineMark = line.match(/^(.{8,400}?)\s*\((v|f|c|e)\)\s*$/iu);
+    if (inlineMark) {
+      const answer = parseBooleanAnswer(inlineMark[2]);
+      if (answer !== null) {
+        add(inlineMark[1], answer, index);
+      }
+      continue;
+    }
+
+    const inlineAnswer = line.match(/^(.{8,400}?)\s+(?:resposta|gabarito)\s*[:\-]\s*(verdadeiro|falso|certo|errado|v|f|c|e)\.?$/iu);
+    if (inlineAnswer) {
+      const answer = parseBooleanAnswer(inlineAnswer[2]);
+      if (answer !== null) {
+        add(inlineAnswer[1], answer, index);
+      }
+      continue;
+    }
+
+    if (isTrueFalseInstructionLine(line)) {
+      const statement = lines[index + 1] ?? "";
+      const answerLine = lines[index + 2] ?? "";
+      const answerMatch = answerLine.match(/^(?:resposta|gabarito)\s*[:\-]\s*(.+)$/iu);
+      const answer = answerMatch ? parseBooleanAnswer(answerMatch[1]) : null;
+      if (answer !== null) {
+        add(statement, answer, index);
+        index += 2;
+      }
+      continue;
+    }
+
+    const questionAnswer = line.match(/^(.{8,400}?)\s+(?:certo ou errado|verdadeiro ou falso)\?\s*$/iu);
+    const nextAnswer = lines[index + 1]?.match(/^(?:resposta|gabarito)\s*[:\-]\s*(.+)$/iu);
+    if (questionAnswer && nextAnswer) {
+      const answer = parseBooleanAnswer(nextAnswer[1]);
+      if (answer !== null) {
+        add(questionAnswer[1], answer, index);
+        index += 1;
+      }
+      continue;
+    }
+
+    if (nextAnswer && isCompleteTrueFalseStatement(line)) {
+      const answer = parseBooleanAnswer(nextAnswer[1]);
+      if (answer !== null) {
+        add(line, answer, index);
+        index += 1;
+      }
+    }
+  }
+
+  return drafts;
+}
+
+function buildTrueFalseDraftsFromStructured(questions: ParsedStructuredQuestion[]): QuestionDraft[] {
+  const drafts: QuestionDraft[] = [];
+
+  for (const question of questions) {
+    if (question.promptStyle !== "TRUE_FALSE") {
+      continue;
+    }
+
+    const answer = parseBooleanAnswer(question.expectedAnswer);
+    const statement = stripTrueFalsePromptPrefix(question.prompt);
+    if (answer === null || !isCompleteTrueFalseStatement(statement)) {
+      continue;
+    }
+
+    drafts.push({
+      type: "TRUE_FALSE",
+      prompt: ensureSentence(statement),
+      topic: question.topic,
+      correctAnswer: answer ? "true" : "false",
+      explanation: answer ? "Verdadeiro" : "Falso",
+      referenceAnswer: question.referenceExcerpt,
+    });
+  }
+
+  return drafts;
+}
+
+function parseReadyFlashcardDrafts(text: string) {
+  const lines = text.split(/\r?\n/).map(sanitizeStructuredLine);
+  const drafts: QuestionDraft[] = [];
+  let sectionTitle = "Questionário importado";
+  let sectionIndex = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line || isSeparatorLine(line)) {
+      continue;
+    }
+
+    if (isStructuredSectionTitle(line)) {
+      sectionTitle = normalizeStructuredSectionTitle(line);
+      sectionIndex += 1;
+      continue;
+    }
+
+    const frontMatch = line.match(/^(?:frente|termo)\s*[:\-]\s*(.*)$/iu);
+    if (!frontMatch) {
+      continue;
+    }
+
+    const front = frontMatch[1] || lines[index + 1] || "";
+    const versoLineIndex = frontMatch[1] ? index + 1 : index + 2;
+    const backMatch = lines[versoLineIndex]?.match(/^(?:verso|defini[cç][aã]o)\s*[:\-]\s*(.*)$/iu);
+    if (!backMatch) {
+      continue;
+    }
+
+    const back = backMatch[1] || lines[versoLineIndex + 1] || "";
+    if (!front.trim() || !back.trim()) {
+      continue;
+    }
+
+    drafts.push({
+      type: "FLASHCARD",
+      prompt: trimOuterPunctuation(front),
+      topic: sectionTitle,
+      correctAnswer: ensureSentence(back),
+      referenceAnswer: ensureSentence(back),
+    });
+  }
+
+  return drafts;
+}
+
+function parseColumnMatchingDrafts(text: string) {
+  const lines = text.split(/\r?\n/).map(sanitizeStructuredLine);
+  const drafts: QuestionDraft[] = [];
+  let sectionTitle = "Questionário importado";
+  let sectionIndex = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (isStructuredSectionTitle(line)) {
+      sectionTitle = normalizeStructuredSectionTitle(line);
+      sectionIndex += 1;
+      continue;
+    }
+
+    if (!/^associe\b/iu.test(normalizeForComparison(line))) {
+      continue;
+    }
+
+    const left = new Map<string, string>();
+    const right = new Map<string, string>();
+    const keys: Array<[string, string]> = [];
+    let mode: "left" | "right" | "key" | null = null;
+
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const current = lines[cursor];
+      if (!current || isSeparatorLine(current)) {
+        continue;
+      }
+
+      const normalized = normalizeForComparison(current);
+      if (/^coluna a\b/.test(normalized)) {
+        mode = "left";
+        continue;
+      }
+
+      if (/^coluna b\b/.test(normalized)) {
+        mode = "right";
+        continue;
+      }
+
+      if (/^gabarito\b/.test(normalized)) {
+        mode = "key";
+        const inlineKeys = current.matchAll(/([A-Z])\s*[-–]\s*(\d+)/giu);
+        for (const match of inlineKeys) {
+          keys.push([match[1].toUpperCase(), match[2]]);
+        }
+        continue;
+      }
+
+      if (mode === "left") {
+        const match = current.match(/^([A-Z])[\).]\s+(.+)$/iu);
+        if (match) {
+          left.set(match[1].toUpperCase(), trimOuterPunctuation(match[2]));
+          continue;
+        }
+      }
+
+      if (mode === "right") {
+        const match = current.match(/^(\d+)[\).]\s+(.+)$/iu);
+        if (match) {
+          right.set(match[1], ensureSentence(match[2]));
+          continue;
+        }
+      }
+
+      if (mode === "key") {
+        const keyMatches = current.matchAll(/([A-Z])\s*[-–]\s*(\d+)/giu);
+        for (const match of keyMatches) {
+          keys.push([match[1].toUpperCase(), match[2]]);
+        }
+
+        if (keys.length > 0 && (!lines[cursor + 1] || isStructuredSectionTitle(lines[cursor + 1]))) {
+          index = cursor;
+          break;
+        }
+      }
+    }
+
+    const pairs = keys
+      .map(([leftKey, rightKey], pairIndex) => {
+        const leftValue = left.get(leftKey);
+        const rightValue = right.get(rightKey);
+        return leftValue && rightValue
+          ? { id: buildDraftId("match", pairIndex, `${leftValue} ${rightValue}`), left: leftValue, right: rightValue }
+          : null;
+      })
+      .filter((pair): pair is { id: string; left: string; right: string } => Boolean(pair));
+
+    if (pairs.length >= 2) {
+      drafts.push({
+        type: "MATCHING",
+        prompt: "Associe cada item à descrição correta.",
+        topic: sectionTitle,
+        matchingPairs: pairs,
+        explanation: pairs.map((pair) => `${pair.left}: ${pair.right}`).join(" "),
+      });
+    }
+  }
+
+  return drafts;
+}
+
+function buildAssociationDraftsFromStructured(questions: ParsedStructuredQuestion[]): QuestionDraft[] {
+  const groups = new Map<string, ParsedStructuredQuestion[]>();
+
+  for (const question of questions) {
+    if (question.promptStyle !== "ASSOCIATION") {
+      continue;
+    }
+
+    const key = question.associationGroup ?? `${question.sectionIndex}:${normalizeForComparison(question.sectionTitle)}`;
+    const group = groups.get(key) ?? [];
+    group.push(question);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()]
+    .filter((group) => group.length >= 2)
+    .map((group) => ({
+      type: "MATCHING",
+      prompt: "Associe cada item à descrição correta.",
+      topic: group[0]?.sectionTitle ?? "Associação",
+      matchingPairs: group.map((question, index) => ({
+        id: buildDraftId("match", index, `${question.prompt} ${question.expectedAnswer}`),
+        left: question.associationItem ?? question.prompt,
+        right: question.expectedAnswer,
+      })),
+      explanation: group.map((question) => `${question.prompt}: ${question.expectedAnswer}`).join(" "),
+    }) satisfies QuestionDraft);
+}
+
+function parseAnswerKeyAtEndDrafts(text: string): QuestionDraft[] {
+  const parts = text.split(/\bGabarito\s*:/iu);
+  if (parts.length < 2) {
+    return [];
+  }
+
+  const questionLines = parts[0]
+    .split(/\r?\n/)
+    .map(sanitizeStructuredLine)
+    .filter((line) => /^\d+[\).]\s+/.test(line));
+  const answerLines = parts
+    .slice(1)
+    .join("\n")
+    .split(/\r?\n/)
+    .map(sanitizeStructuredLine)
+    .filter((line) => /^\d+[\).]\s+/.test(line));
+
+  if (questionLines.length < 2 || answerLines.length < 2) {
+    return [];
+  }
+
+  const answers = new Map(
+    answerLines.map((line) => {
+      const match = line.match(/^(\d+)[\).]\s+(.+)$/);
+      return [match?.[1] ?? "", ensureSentence(match?.[2] ?? "")] as const;
+    }),
+  );
+
+  const drafts: QuestionDraft[] = [];
+
+  for (const line of questionLines) {
+    const match = line.match(/^(\d+)[\).]\s+(.+)$/);
+    const answer = match ? answers.get(match[1]) : "";
+    if (!match || !answer) {
+      continue;
+    }
+
+    drafts.push({
+      type: "REVEAL_ANSWER",
+      prompt: trimOuterPunctuation(match[2]),
+      topic: "Gabarito",
+      correctAnswer: answer,
+      referenceAnswer: answer,
+    });
+  }
+
+  return drafts;
+}
+
+function validateReadyDraft(question: QuestionDraft) {
+  if (!question.prompt || containsBrokenGeneratedText(question.prompt)) {
+    return false;
+  }
+
+  if (question.type === "MULTIPLE_CHOICE") {
+    const choices = question.choices ?? [];
+    return choices.length >= 2 && Boolean(question.correctAnswer) && choices.some((choice) => choice.label === question.correctAnswer);
+  }
+
+  if (question.type === "TRUE_FALSE") {
+    return (
+      (question.correctAnswer === "true" || question.correctAnswer === "false") &&
+      isCompleteTrueFalseStatement(question.prompt)
+    );
+  }
+
+  if (question.type === "MATCHING") {
+    return (question.matchingPairs ?? []).length >= 2;
+  }
+
+  if (question.type === "FLASHCARD" || question.type === "REVEAL_ANSWER") {
+    return Boolean(question.correctAnswer);
+  }
+
+  return false;
+}
+
+function dedupeQuestionDrafts(questions: QuestionDraft[]) {
+  const seen = new Set<string>();
+  const result: QuestionDraft[] = [];
+
+  for (const question of questions) {
+    const key = `${question.type}|${buildPromptSignature(question.prompt)}|${buildPromptSignature(question.correctAnswer ?? question.explanation ?? "")}`;
+    if (seen.has(key) || !validateReadyDraft(question)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(question);
+  }
+
+  return result;
+}
+
+function parseReadyQuestionDrafts(text: string, structuredQuestions: ParsedStructuredQuestion[]) {
+  return dedupeQuestionDrafts([
+    ...parseReadyMultipleChoiceDrafts(text),
+    ...parseColumnMatchingDrafts(text),
+    ...buildAssociationDraftsFromStructured(structuredQuestions),
+    ...parseReadyTrueFalseDrafts(text),
+    ...buildTrueFalseDraftsFromStructured(structuredQuestions),
+    ...parseReadyFlashcardDrafts(text),
+    ...parseAnswerKeyAtEndDrafts(text),
+  ]);
+}
+
+function isUsableStructuredQuestion(question: ParsedStructuredQuestion) {
+  if (question.promptStyle !== "TRUE_FALSE") {
+    return true;
+  }
+
+  return parseBooleanAnswer(question.expectedAnswer) !== null && isCompleteTrueFalseStatement(question.prompt);
+}
+
 export function detectStructuredQuestionnaire(text: string) {
-  return parseStructuredQuestionnaire(text).length >= MINIMUM_STRUCTURED_QUESTION_PAIRS;
+  const structuredQuestions = parseStructuredQuestionnaire(text).filter(isUsableStructuredQuestion);
+  const readyDrafts = parseReadyQuestionDrafts(text, structuredQuestions);
+  const trueFalseCount = readyDrafts.filter((question) => question.type === "TRUE_FALSE").length;
+  const flashcardCount = readyDrafts.filter((question) => question.type === "FLASHCARD").length;
+  const revealAnswerCount = readyDrafts.filter((question) => question.type === "REVEAL_ANSWER").length;
+
+  return (
+    structuredQuestions.length >= MINIMUM_STRUCTURED_QUESTION_PAIRS ||
+    readyDrafts.some((question) => question.type === "MULTIPLE_CHOICE" || question.type === "MATCHING") ||
+    trueFalseCount >= 3 ||
+    flashcardCount >= 3 ||
+    revealAnswerCount >= 3
+  );
 }
 
 function buildTopicFallback(section: TextSection, content: string) {
@@ -1350,15 +2081,30 @@ function dedupeUnits(units: KnowledgeUnit[]) {
 }
 
 function analyzeDocument(document: Document): DocumentAnalysis {
-  const structuredQuestions = parseStructuredQuestionnaire(document.cleanedText);
+  const structuredQuestions = parseStructuredQuestionnaire(document.cleanedText).filter(isUsableStructuredQuestion);
+  const structuredDrafts = parseReadyQuestionDrafts(document.cleanedText, structuredQuestions);
   const sections = extractSections(document.cleanedText);
+  const trueFalseCount = structuredDrafts.filter((question) => question.type === "TRUE_FALSE").length;
+  const flashcardCount = structuredDrafts.filter((question) => question.type === "FLASHCARD").length;
+  const revealAnswerCount = structuredDrafts.filter((question) => question.type === "REVEAL_ANSWER").length;
+  const hasEnoughReadyQuestions =
+    structuredDrafts.some((question) => question.type === "MULTIPLE_CHOICE" || question.type === "MATCHING") ||
+    trueFalseCount >= 3 ||
+    flashcardCount >= 3 ||
+    revealAnswerCount >= 3;
 
-  if (structuredQuestions.length >= MINIMUM_STRUCTURED_QUESTION_PAIRS) {
+  if (structuredQuestions.length >= MINIMUM_STRUCTURED_QUESTION_PAIRS || hasEnoughReadyQuestions) {
     return {
       sections,
       units: [],
+      structuredDrafts,
       structuredQuestions,
-      emphasis: [...new Set(structuredQuestions.map((question) => question.topic))].slice(0, 3),
+      emphasis: [
+        ...new Set([
+          ...structuredDrafts.map((question) => question.topic),
+          ...structuredQuestions.map((question) => question.topic),
+        ]),
+      ].slice(0, 3),
     };
   }
 
@@ -1366,6 +2112,7 @@ function analyzeDocument(document: Document): DocumentAnalysis {
   return {
     sections,
     units: [],
+    structuredDrafts: [],
     structuredQuestions: [],
     emphasis: [],
   };
@@ -1801,7 +2548,7 @@ function buildStructuredRubric(question: ParsedStructuredQuestion, limit = 4) {
 
 function buildAssociationPrompt(question: ParsedStructuredQuestion) {
   const item = question.associationItem ?? question.prompt;
-  return `${item} está associada a que?`;
+  return `${item} está associado a qual resposta?`;
 }
 
 function createStructuredShortAnswerQuestion(
@@ -1810,84 +2557,19 @@ function createStructuredShortAnswerQuestion(
   prompt = question.promptStyle === "ASSOCIATION" ? buildAssociationPrompt(question) : question.prompt,
 ): QuestionDraft {
   return {
-    type: "SHORT_ANSWER",
+    type: "REVEAL_ANSWER",
     prompt,
     topic: question.topic,
     responseFormat,
     correctAnswer: question.expectedAnswer,
     referenceAnswer: question.referenceExcerpt,
-    rubric: buildStructuredRubric(question),
-    explanation: "A resposta ideal deve recuperar a resposta original com fidelidade.",
+    explanation: question.expectedAnswer,
   };
-}
-
-function createStructuredFlashcardQuestion(question: ParsedStructuredQuestion): QuestionDraft {
-  return {
-    type: "FLASHCARD",
-    prompt: question.promptStyle === "ASSOCIATION" ? (question.associationItem ?? question.prompt) : question.prompt,
-    topic: question.topic,
-    correctAnswer: question.expectedAnswer,
-    referenceAnswer: question.referenceExcerpt,
-    explanation: "Compare o verso com a resposta original antes de marcar seu desempenho.",
-  };
-}
-
-function buildStructuredFeynmanPrompt(question: ParsedStructuredQuestion) {
-  const basePrompt = question.promptStyle === "ASSOCIATION" ? buildAssociationPrompt(question) : question.prompt;
-  return `Explique com suas palavras: ${basePrompt}`;
-}
-
-function createStructuredDiscursiveQuestion(question: ParsedStructuredQuestion): QuestionDraft {
-  return createStructuredShortAnswerQuestion(question, "LONG");
 }
 
 function createStructuredFeynmanQuestion(question: ParsedStructuredQuestion): QuestionDraft {
-  return createStructuredShortAnswerQuestion(question, "LONG", buildStructuredFeynmanPrompt(question));
-}
-
-function buildTrueFalseStatement(
-  question: ParsedStructuredQuestion,
-  questions: ParsedStructuredQuestion[],
-) {
-  const distractor = buildStructuredDistractorPool(question, questions)[0];
-  const useCorrectStatement =
-    (normalizeForComparison(question.prompt).length + countWords(question.expectedAnswer) + question.sectionIndex) % 2 === 0 ||
-    !distractor;
-
-  return useCorrectStatement
-    ? {
-        statement: question.expectedAnswer,
-        correctAnswer: "true",
-        explanation: question.expectedAnswer,
-      }
-    : {
-        statement: distractor.expectedAnswer,
-        correctAnswer: "false",
-        explanation: question.expectedAnswer,
-      };
-}
-
-function createStructuredTrueFalseQuestion(
-  question: ParsedStructuredQuestion,
-  questions: ParsedStructuredQuestion[],
-) {
-  if (!question.expectedAnswer || question.expectedAnswer.length < 12 || question.promptStyle === "ASSOCIATION") {
-    return null;
-  }
-
-  const statement = buildTrueFalseStatement(question, questions);
-  if (!isSafeStructuredAlternative(statement.statement)) {
-    return null;
-  }
-
-  return {
-    type: "TRUE_FALSE",
-    prompt: `Verdadeiro ou falso: ${statement.statement}`,
-    topic: question.topic,
-    correctAnswer: statement.correctAnswer,
-    explanation: statement.explanation,
-    referenceAnswer: question.referenceExcerpt,
-  } satisfies QuestionDraft;
+  const prompt = question.promptStyle === "ASSOCIATION" ? buildAssociationPrompt(question) : question.prompt;
+  return createStructuredShortAnswerQuestion(question, "LONG", prompt);
 }
 
 function selectFillBlankToken(answer: string) {
@@ -1942,12 +2624,28 @@ function hasLooselyComparableLength(left: string, right: string) {
   return ratio >= 0.4 && ratio <= 2.4;
 }
 
+function looksLikeQuestionText(value: string) {
+  const cleaned = trimOuterPunctuation(value);
+  const normalized = normalizeForComparison(cleaned);
+
+  return (
+    !cleaned ||
+    cleaned.endsWith("?") ||
+    /(?:^|[\s(])(p|pergunta)\s*:/i.test(cleaned) ||
+    /(?:^|[\s(])(r|resposta)\s*:/i.test(cleaned) ||
+    /^pergunta:/i.test(cleaned) ||
+    /^resposta:/i.test(cleaned) ||
+    /^(o que|por que|quais|qual|como|para que|quem|quando|onde)\b/i.test(normalized) ||
+    /^(associe|relacione|complete|verdadeiro ou falso)\b/i.test(normalized)
+  );
+}
+
 function isSafeStructuredAlternative(value: string) {
   const cleaned = trimOuterPunctuation(value);
   return (
     cleaned.length >= 6 &&
     !/^(?:p|r|pergunta|resposta|resposta esperada|gabarito)\s*[:\-]/i.test(cleaned) &&
-    !cleaned.endsWith("?") &&
+    !looksLikeQuestionText(cleaned) &&
     !looksLikeSystemNoise(cleaned) &&
     !hasBrokenExtractionSymbols(cleaned) &&
     !isMetaInstructionLine(cleaned)
@@ -1958,41 +2656,337 @@ function buildStructuredChoiceId(question: ParsedStructuredQuestion, index: numb
   return `${normalizeForComparison(question.topic || question.prompt).slice(0, 48)}-${index + 1}`;
 }
 
+function getStructuredContextTokens(question: ParsedStructuredQuestion) {
+  return uniqueConceptTokens(`${question.prompt} ${question.expectedAnswer} ${question.topic} ${question.sectionTitle}`);
+}
+
+function countSharedTokenValues(left: string[], right: string[]) {
+  const rightSet = new Set(right);
+  let shared = 0;
+
+  for (const token of left) {
+    if (rightSet.has(token)) {
+      shared += 1;
+    }
+  }
+
+  return shared;
+}
+
+function areStructuredKindsCompatible(
+  expected: StructuredQuestionAnswerKind,
+  candidate: StructuredQuestionAnswerKind,
+) {
+  if (expected === candidate) {
+    return true;
+  }
+
+  return (
+    (expected === "formula" && candidate === "numeric_case") ||
+    (expected === "numeric_case" && candidate === "formula") ||
+    (expected === "procedure" && candidate === "rule") ||
+    (expected === "rule" && candidate === "procedure")
+  );
+}
+
+function detectStructuredLead(answer: string, kind: StructuredQuestionAnswerKind) {
+  const normalized = normalizeForComparison(answer);
+
+  if (kind === "reason") {
+    if (normalized.startsWith("pois ")) {
+      return "pois";
+    }
+
+    if (normalized.startsWith("devido a ")) {
+      return "devido a";
+    }
+
+    return "porque";
+  }
+
+  if (kind === "definition") {
+    return normalized.startsWith("e ") ? "e" : "definition";
+  }
+
+  if (kind === "list") {
+    return looksLikeListAnswer(answer) ? "list" : "sentence";
+  }
+
+  if (kind === "formula" || kind === "numeric_case") {
+    return /\b\d+(?:[.,]\d+)?%?\b/.test(answer) ? "numeric" : "formula";
+  }
+
+  if (kind === "procedure" || kind === "rule") {
+    if (/^(deve|devem)\b/i.test(normalized)) {
+      return "deve";
+    }
+
+    if (/^(primeiro|antes|apos)\b/i.test(normalized)) {
+      return "sequence";
+    }
+  }
+
+  return "sentence";
+}
+
+function isDirectExpressionStyleAnswer(answer: string) {
+  return /^(o\s+senhor|senhor|voce)\b/i.test(normalizeForComparison(answer));
+}
+
+function extractNumericTokens(value: string) {
+  return [...value.matchAll(/\b\d+(?:[.,]\d+)?%?\b/g)].map((match) => match[0]);
+}
+
+function haveDistinctNumericContent(left: string, right: string) {
+  const leftTokens = extractNumericTokens(left);
+  const rightTokens = extractNumericTokens(right);
+
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return true;
+  }
+
+  return leftTokens.join("|") !== rightTokens.join("|");
+}
+
+function hasCompatibleStructuredShape(
+  correctAnswer: string,
+  candidateAnswer: string,
+  kind: StructuredQuestionAnswerKind,
+) {
+  switch (kind) {
+    case "reason":
+      return isReasonStyleAnswer(candidateAnswer);
+    case "definition":
+      return isDefinitionLikeStructuredAnswer(candidateAnswer);
+    case "list":
+      return looksLikeListAnswer(candidateAnswer);
+    case "formula":
+      return /=/.test(candidateAnswer) || /\b\d+(?:[.,]\d+)?%?\b/.test(candidateAnswer);
+    case "numeric_case":
+      return /\b\d+(?:[.,]\d+)?%?\b/.test(candidateAnswer);
+    case "procedure":
+      return hasProcedureLanguage(candidateAnswer);
+    case "rule":
+      return hasRuleLanguage(candidateAnswer);
+    default:
+      return detectStructuredLead(correctAnswer, kind) === detectStructuredLead(candidateAnswer, kind);
+  }
+}
+
+function getStructuredRelationBucket(question: ParsedStructuredQuestion, candidate: ParsedStructuredQuestion) {
+  if (candidate.sectionIndex === question.sectionIndex) {
+    return "same";
+  }
+
+  const sectionSimilarity = conceptSimilarity(
+    `${candidate.sectionTitle} ${candidate.topic}`,
+    `${question.sectionTitle} ${question.topic}`,
+  );
+
+  if (sectionSimilarity >= 0.28 || Math.abs(candidate.sectionIndex - question.sectionIndex) <= 1) {
+    return "near";
+  }
+
+  return "global";
+}
+
+function scoreStructuredDistractorCandidate(
+  question: ParsedStructuredQuestion,
+  candidate: ParsedStructuredQuestion,
+) {
+  if (candidate.prompt === question.prompt) {
+    return -1;
+  }
+
+  if (
+    normalizeForComparison(candidate.expectedAnswer) === normalizeForComparison(question.expectedAnswer) ||
+    !isSafeStructuredAlternative(candidate.expectedAnswer) ||
+    !areStructuredKindsCompatible(question.answerKind, candidate.answerKind) ||
+    !hasLooselyComparableLength(candidate.expectedAnswer, question.expectedAnswer) ||
+    !hasCompatibleStructuredShape(question.expectedAnswer, candidate.expectedAnswer, question.answerKind)
+  ) {
+    return -1;
+  }
+
+  const answerSimilarity = conceptSimilarity(candidate.expectedAnswer, question.expectedAnswer);
+  const allowsNearNumericMatch =
+    (question.answerKind === "numeric_case" || question.answerKind === "formula") &&
+    haveDistinctNumericContent(candidate.expectedAnswer, question.expectedAnswer);
+  if (answerSimilarity >= 0.82 && !allowsNearNumericMatch) {
+    return -1;
+  }
+
+  const questionTokens = getStructuredContextTokens(question);
+  const candidateTokens = uniqueConceptTokens(
+    `${candidate.prompt} ${candidate.expectedAnswer} ${candidate.topic} ${candidate.sectionTitle}`,
+  );
+  const sharedTokens = countSharedTokenValues(questionTokens, candidateTokens);
+  const contextSimilarity = conceptSimilarity(
+    `${candidate.prompt} ${candidate.expectedAnswer} ${candidate.topic}`,
+    `${question.prompt} ${question.expectedAnswer} ${question.topic}`,
+  );
+  const relationBucket = getStructuredRelationBucket(question, candidate);
+
+  if (relationBucket === "global" && sharedTokens < 2 && contextSimilarity < 0.24) {
+    return -1;
+  }
+
+  if (relationBucket !== "same" && sharedTokens === 0 && contextSimilarity < 0.16) {
+    return -1;
+  }
+
+  const leadBonus =
+    detectStructuredLead(question.expectedAnswer, question.answerKind) ===
+    detectStructuredLead(candidate.expectedAnswer, question.answerKind)
+      ? 1.2
+      : 0;
+
+  const bucketScore = relationBucket === "same" ? 8 : relationBucket === "near" ? 5 : 1;
+  const lengthGap = Math.abs(countWords(candidate.expectedAnswer) - countWords(question.expectedAnswer));
+
+  return (
+    bucketScore +
+    sharedTokens * 2.5 +
+    contextSimilarity * 6 +
+    leadBonus +
+    (candidate.sectionIndex === question.sectionIndex ? 0.8 : 0) -
+    answerSimilarity * 3 -
+    Math.min(2, lengthGap / 6)
+  );
+}
+
+function buildReasonDerivedDistractors(question: ParsedStructuredQuestion) {
+  const keywords = extractReferenceKeywords(
+    `${question.prompt} ${question.expectedAnswer} ${question.topic} ${question.sectionTitle}`,
+    8,
+  ).filter((token) => token.length >= 4);
+  const primary = keywords[0] ?? "processo";
+  const secondary = keywords[1] ?? primary;
+  const tertiary = keywords[2] ?? secondary;
+  const quaternary = keywords[3] ?? tertiary;
+  const lead = detectStructuredLead(question.expectedAnswer, question.answerKind);
+
+  const bodies = [
+    `${primary} considera apenas ${secondary}, sem confrontar ${tertiary} durante a apuracao`,
+    `${secondary} e atualizada somente depois de ${tertiary}, o que desloca ${primary} do registro original`,
+    `${primary} depende exclusivamente de ${secondary} registrada, ignorando ${tertiary} e ${quaternary}`,
+  ];
+
+  return bodies.map((body) => {
+    if (lead === "pois") {
+      return `Pois ${body}.`;
+    }
+
+    if (lead === "devido a") {
+      return `Devido a ${body}.`;
+    }
+
+    return `Porque ${body}.`;
+  });
+}
+
+function buildDirectExpressionDerivedDistractors(question: ParsedStructuredQuestion) {
+  const keywords = extractReferenceKeywords(
+    `${question.prompt} ${question.expectedAnswer} ${question.topic} ${question.sectionTitle}`,
+    6,
+  );
+  const objectToken = keywords.find((token) => !["senhor", "senhora", "abordagem", "corretiva"].includes(token)) ?? "produto";
+
+  return [
+    `O Senhor/Senhora precisa confirmar o registro do ${objectToken} antes de seguir.`,
+    `O Senhor/Senhora deve regularizar o ${objectToken} no caixa antes de concluir.`,
+    `O Senhor/Senhora pode refazer o registro do ${objectToken} antes do pagamento.`,
+  ];
+}
+
+function buildNumericDerivedDistractors(question: ParsedStructuredQuestion) {
+  const matches = [...question.expectedAnswer.matchAll(/\b\d+(?:[.,]\d+)?%?\b/g)].map((match) => match[0]);
+  if (matches.length === 0) {
+    return [];
+  }
+
+  const replacements = matches.map((value, index) => {
+    const numeric = Number.parseFloat(value.replace("%", "").replace(",", "."));
+    if (!Number.isFinite(numeric)) {
+      return value;
+    }
+
+    const mutated = index === matches.length - 1 && value.endsWith("%") ? numeric + 20 : numeric + 1;
+    const asText = Number.isInteger(mutated) ? String(mutated) : String(mutated).replace(".", ",");
+    return value.endsWith("%") ? `${asText}%` : asText;
+  });
+
+  const variants: string[] = [];
+
+  for (let index = 0; index < matches.length; index += 1) {
+    let variant = question.expectedAnswer;
+    variant = variant.replace(matches[index]!, replacements[index]!);
+    variants.push(variant);
+  }
+
+  return variants;
+}
+
+function buildDerivedStructuredDistractors(question: ParsedStructuredQuestion) {
+  if (isDirectExpressionStyleAnswer(question.expectedAnswer)) {
+    return buildDirectExpressionDerivedDistractors(question);
+  }
+
+  if (question.answerKind === "reason") {
+    return buildReasonDerivedDistractors(question);
+  }
+
+  if (question.answerKind === "formula" || question.answerKind === "numeric_case") {
+    return buildNumericDerivedDistractors(question);
+  }
+
+  return [];
+}
+
 function buildStructuredDistractorPool(
   question: ParsedStructuredQuestion,
   questions: ParsedStructuredQuestion[],
 ) {
-  return questions
-    .filter((candidate) => candidate.prompt !== question.prompt)
-    .filter(
-      (candidate) =>
-        normalizeForComparison(candidate.expectedAnswer) !== normalizeForComparison(question.expectedAnswer),
-    )
-    .filter((candidate) => isSafeStructuredAlternative(candidate.expectedAnswer))
-    .filter((candidate) => conceptSimilarity(candidate.expectedAnswer, question.expectedAnswer) < 0.82)
-    .filter((candidate) => hasLooselyComparableLength(candidate.expectedAnswer, question.expectedAnswer))
-    .sort((left, right) => {
-      const leftScore =
-        (question.promptStyle === "ASSOCIATION" &&
-        left.associationGroup &&
-        left.associationGroup === question.associationGroup
-          ? 2
-          : 0) +
-        (left.sectionIndex === question.sectionIndex ? 1 : 0) +
-        conceptSimilarity(`${left.topic} ${left.prompt}`, `${question.topic} ${question.prompt}`);
-      const rightScore =
-        (question.promptStyle === "ASSOCIATION" &&
-        right.associationGroup &&
-        right.associationGroup === question.associationGroup
-          ? 2
-          : 0) +
-        (right.sectionIndex === question.sectionIndex ? 1 : 0) +
-        conceptSimilarity(`${right.topic} ${right.prompt}`, `${question.topic} ${question.prompt}`);
-      return rightScore - leftScore;
-    });
+  const pool = questions
+    .map((candidate) => ({
+      expectedAnswer: candidate.expectedAnswer,
+      score: scoreStructuredDistractorCandidate(question, candidate),
+    }))
+    .filter((candidate) => candidate.score >= 0)
+    .sort((left, right) => right.score - left.score);
+
+  const seen = new Set(pool.map((candidate) => normalizeForComparison(candidate.expectedAnswer)));
+  for (const derived of buildDerivedStructuredDistractors(question)) {
+    const normalized = normalizeForComparison(derived);
+    const allowsNearNumericMatch =
+      (question.answerKind === "numeric_case" || question.answerKind === "formula") &&
+      haveDistinctNumericContent(derived, question.expectedAnswer);
+    if (
+      seen.has(normalized) ||
+      !isSafeStructuredAlternative(derived) ||
+      !hasLooselyComparableLength(derived, question.expectedAnswer) ||
+      !hasCompatibleStructuredShape(question.expectedAnswer, derived, question.answerKind) ||
+      (conceptSimilarity(derived, question.expectedAnswer) >= 0.9 && !allowsNearNumericMatch)
+    ) {
+      continue;
+    }
+
+    pool.push({ expectedAnswer: derived, score: 0.5 });
+    seen.add(normalized);
+  }
+
+  return pool
+    .sort((left, right) => right.score - left.score)
+    .filter((candidate, index, list) =>
+      list.findIndex((item) => normalizeForComparison(item.expectedAnswer) === normalizeForComparison(candidate.expectedAnswer)) === index,
+    );
 }
 
-function validateStructuredMultipleChoiceChoices(correctAnswer: string, choices: QuestionChoice[]) {
+function validateStructuredMultipleChoiceChoices(
+  correctAnswer: string,
+  choices: QuestionChoice[],
+  prompt = "",
+) {
   if (choices.length !== 4) {
     return false;
   }
@@ -2006,7 +3000,11 @@ function validateStructuredMultipleChoiceChoices(correctAnswer: string, choices:
     return false;
   }
 
-  return choices.every((choice) => {
+  const expectedKind = classifyQuestionAnswer(prompt, correctAnswer);
+  const contextTokens = uniqueConceptTokens(`${prompt} ${correctAnswer}`);
+  let plausibleDistractors = 0;
+
+  const allChoicesAreValid = choices.every((choice) => {
     if (!isSafeStructuredAlternative(choice.label)) {
       return false;
     }
@@ -2015,11 +3013,30 @@ function validateStructuredMultipleChoiceChoices(correctAnswer: string, choices:
       return true;
     }
 
-    return (
-      conceptSimilarity(choice.label, correctAnswer) < 0.86 &&
-      hasLooselyComparableLength(choice.label, correctAnswer)
-    );
+    const sharedTokens = countSharedTokenValues(contextTokens, extractConceptTokens(choice.label));
+    const sameShape = hasCompatibleStructuredShape(correctAnswer, choice.label, expectedKind);
+    const allowsNearNumericMatch =
+      (expectedKind === "numeric_case" || expectedKind === "formula") &&
+      haveDistinctNumericContent(choice.label, correctAnswer);
+    const sameTheme =
+      expectedKind === "association" ||
+      sharedTokens >= 1 ||
+      conceptSimilarity(`${prompt} ${choice.label}`, `${prompt} ${correctAnswer}`) >= 0.22;
+
+    if (
+      (conceptSimilarity(choice.label, correctAnswer) >= 0.86 && !allowsNearNumericMatch) ||
+      !hasLooselyComparableLength(choice.label, correctAnswer) ||
+      !sameShape ||
+      !sameTheme
+    ) {
+      return false;
+    }
+
+    plausibleDistractors += 1;
+    return true;
   });
+
+  return allChoicesAreValid && plausibleDistractors >= 2;
 }
 
 function createStructuredMultipleChoiceQuestion(
@@ -2039,24 +3056,29 @@ function createStructuredMultipleChoiceQuestion(
     return null;
   }
 
+  const prompt =
+    question.promptStyle === "ASSOCIATION"
+      ? `${question.associationItem ?? question.prompt} está associado a qual descrição?`
+      : question.prompt;
+
   const choices = rotateChoices(
     [
       { id: buildStructuredChoiceId(question, 0), label: question.expectedAnswer },
       ...selected.map((candidate, index) => ({
-        id: buildStructuredChoiceId(candidate, index + 1),
+        id: buildStructuredChoiceId(question, index + 1),
         label: candidate.expectedAnswer,
       })),
     ],
     countWords(question.expectedAnswer),
   );
 
-  if (!validateStructuredMultipleChoiceChoices(question.expectedAnswer, choices)) {
+  if (!validateStructuredMultipleChoiceChoices(question.expectedAnswer, choices, prompt)) {
     return null;
   }
 
   return {
     type: "MULTIPLE_CHOICE",
-    prompt: question.promptStyle === "ASSOCIATION" ? `${question.associationItem ?? question.prompt} está associada a qual descrição?` : question.prompt,
+    prompt,
     topic: question.topic,
     choices,
     correctAnswer: question.expectedAnswer,
@@ -2327,7 +3349,11 @@ function getQuestionDraftRejectionReason(
 
   if (question.type === "MULTIPLE_CHOICE" && question.choices) {
     const isValidChoices = options?.structured
-      ? Boolean(question.correctAnswer) && validateStructuredMultipleChoiceChoices(question.correctAnswer!, question.choices)
+      ? Boolean(question.correctAnswer) &&
+        question.choices.length >= 2 &&
+        new Set(question.choices.map((choice) => buildPromptSignature(choice.label))).size === question.choices.length &&
+        question.choices.some((choice) => buildPromptSignature(choice.label) === buildPromptSignature(question.correctAnswer!)) &&
+        question.choices.every((choice) => isSafeStructuredAlternative(choice.label))
       : Boolean(question.correctAnswer) && validateMultipleChoiceChoices(question.correctAnswer!, question.choices);
 
     if (!isValidChoices) {
@@ -2438,16 +3464,43 @@ function uniqueStructuredQuestions(questions: QuestionDraft[]) {
   return accepted;
 }
 
+function ensureFinalStructuredMultipleChoice(
+  questions: QuestionDraft[],
+  sourceQuestions: ParsedStructuredQuestion[],
+  mode: QuizMode,
+) {
+  if (mode !== "QUICK_REVIEW" && mode !== "DEEP_DIVE") {
+    return questions;
+  }
+
+  if (questions.some((question) => question.type === "MULTIPLE_CHOICE")) {
+    return questions;
+  }
+
+  const fallback = sourceQuestions
+    .map((question) => createStructuredMultipleChoiceQuestion(question, sourceQuestions))
+    .find((candidate) => candidate?.type === "MULTIPLE_CHOICE");
+  if (!fallback) {
+    return questions;
+  }
+
+  const filtered = questions.filter((question) => !areQuestionsTooSimilar(question, fallback));
+  return [fallback, ...filtered];
+}
+
 function getAllowedCompositions(mode: QuizMode): QuizComposition[] {
-  if (mode === "FEYNMAN") {
-    return ["DISCURSIVE_ONLY"];
+  switch (mode) {
+    case "QUICK_REVIEW":
+      return ["AUTO"];
+    case "DEEP_DIVE":
+      return ["MULTIPLE_CHOICE_ONLY"];
+    case "EXAM":
+      return ["AUTO"];
+    case "FEYNMAN":
+      return ["DISCURSIVE_ONLY"];
+    case "FLASHCARDS":
+      return ["AUTO"];
   }
-
-  if (mode === "FLASHCARDS") {
-    return ["AUTO"];
-  }
-
-  return ["AUTO", "MULTIPLE_CHOICE_ONLY", "DISCURSIVE_ONLY"];
 }
 
 function resolveCompositionForMode(mode: QuizMode, composition?: QuizComposition) {
@@ -2456,34 +3509,24 @@ function resolveCompositionForMode(mode: QuizMode, composition?: QuizComposition
 }
 
 function buildCompositionDescription(mode: QuizMode, composition: QuizComposition) {
-  if (mode === "FEYNMAN") {
-    return "Sempre discursivo, com explicações e reformulação didática.";
-  }
-
-  if (mode === "FLASHCARDS") {
-    return "Formato fixo de frente e verso para revisão rápida.";
-  }
-
   if (mode === "QUICK_REVIEW" && composition === "AUTO") {
-    return "Prioriza múltipla escolha, verdadeiro ou falso, lacunas e respostas curtas.";
+    return "Combina os tipos disponíveis no questionário: múltipla escolha, verdadeiro/falso, associação e revelar resposta.";
   }
 
-  if (mode === "DEEP_DIVE" && composition === "AUTO") {
-    return "Mistura perguntas objetivas com explicações curtas e discursivas.";
+  if (mode === "DEEP_DIVE" && composition === "MULTIPLE_CHOICE_ONLY") {
+    return "Usa questões com alternativas prontas ou perguntas convertíveis com distratores plausíveis.";
   }
 
   if (mode === "EXAM" && composition === "AUTO") {
-    return "Combina perguntas objetivas e discursivas para uma rodada mais completa.";
+    return "Usa apenas afirmações marcadas como verdadeiro/falso ou certo/errado no arquivo.";
   }
 
-  if (composition === "MULTIPLE_CHOICE_ONLY") {
-    return "Usa apenas itens objetivos com alternativas plausíveis.";
+  if (mode === "FLASHCARDS" && composition === "AUTO") {
+    return "Usa blocos de associação para relacionar itens às respostas corretas.";
   }
 
-  if (composition === "DISCURSIVE_ONLY") {
-    return mode === "QUICK_REVIEW"
-      ? "Usa respostas curtas e diretas, sem alternativas."
-      : "Usa apenas perguntas discursivas e respostas escritas.";
+  if (mode === "FEYNMAN" && composition === "DISCURSIVE_ONLY") {
+    return "Mostra a pergunta, revela o gabarito e permite marcar Errei, Quase ou Acertei.";
   }
 
   return "Combina os tipos mais adequados para este modo.";
@@ -2493,6 +3536,28 @@ type StructuredQuestionBuilder = (
   question: ParsedStructuredQuestion,
   questions: ParsedStructuredQuestion[],
 ) => QuestionDraft | null;
+
+function ensureStructuredQuestionType(
+  result: QuestionDraft[],
+  questions: ParsedStructuredQuestion[],
+  builder: StructuredQuestionBuilder,
+  type: QuestionDraft["type"],
+  limit: number,
+) {
+  if (result.some((question) => question.type === type)) {
+    return result;
+  }
+
+  const fallback = questions
+    .map((question) => builder(question, questions))
+    .find((candidate): candidate is QuestionDraft => candidate?.type === type);
+  if (!fallback) {
+    return result;
+  }
+
+  const filtered = result.filter((question) => !areQuestionsTooSimilar(question, fallback));
+  return [fallback, ...filtered].slice(0, limit);
+}
 
 function createStructuredQuestionSet(
   questions: ParsedStructuredQuestion[],
@@ -2519,6 +3584,47 @@ function createStructuredQuestionSet(
   return result;
 }
 
+function normalizeQuestionForMode(question: QuestionDraft, mode: QuizMode): QuestionDraft {
+  if (
+    (mode === "QUICK_REVIEW" || mode === "FEYNMAN") &&
+    (question.type === "FLASHCARD" || question.type === "SHORT_ANSWER")
+  ) {
+    return {
+      ...question,
+      type: "REVEAL_ANSWER",
+      responseFormat: "LONG",
+    };
+  }
+
+  return question;
+}
+
+function isReadyDraftCompatible(question: QuestionDraft, mode: QuizMode) {
+  switch (mode) {
+    case "QUICK_REVIEW":
+      return ["MULTIPLE_CHOICE", "TRUE_FALSE", "MATCHING", "FLASHCARD", "REVEAL_ANSWER"].includes(question.type);
+    case "DEEP_DIVE":
+      return question.type === "MULTIPLE_CHOICE";
+    case "EXAM":
+      return question.type === "TRUE_FALSE";
+    case "FEYNMAN":
+      return question.type === "FLASHCARD" || question.type === "REVEAL_ANSWER";
+    case "FLASHCARDS":
+      return question.type === "MATCHING";
+  }
+}
+
+function takeReadyDraftsForMode(
+  drafts: QuestionDraft[],
+  mode: QuizMode,
+  _composition: QuizComposition,
+  limit: number,
+) {
+  return shuffleArray(drafts.filter((question) => isReadyDraftCompatible(question, mode)))
+    .map((question) => normalizeQuestionForMode(question, mode))
+    .slice(0, limit);
+}
+
 function rankQuestionsForDeepDive(questions: ParsedStructuredQuestion[]) {
   return [...questions].sort((left, right) => {
     const leftScore =
@@ -2533,63 +3639,54 @@ function rankQuestionsForDeepDive(questions: ParsedStructuredQuestion[]) {
 
 function buildStructuredQuestionCandidates(
   questions: ParsedStructuredQuestion[],
+  readyDrafts: QuestionDraft[],
   mode: QuizMode,
   composition: QuizComposition,
 ) {
   const target = getTargetQuestionCount(mode);
   const selectionSize = Math.max(target * 2, 24);
+  const readyQuestions = takeReadyDraftsForMode(readyDrafts, mode, composition, target);
   const selected =
     mode === "DEEP_DIVE" || mode === "FEYNMAN"
       ? rankQuestionsForDeepDive(takeBalancedStructuredQuestions(questions, selectionSize))
       : takeBalancedStructuredQuestions(questions, selectionSize);
   const multipleChoice: StructuredQuestionBuilder = (question, currentQuestions) =>
     createStructuredMultipleChoiceQuestion(question, currentQuestions);
-  const trueFalse: StructuredQuestionBuilder = (question, currentQuestions) =>
-    createStructuredTrueFalseQuestion(question, currentQuestions);
-  const fillBlank: StructuredQuestionBuilder = (question) => createStructuredFillBlankQuestion(question);
-  const shortAnswer: StructuredQuestionBuilder = (question) =>
-    createStructuredShortAnswerQuestion(question, "SHORT");
-  const discursive: StructuredQuestionBuilder = (question) => createStructuredDiscursiveQuestion(question);
   const feynman: StructuredQuestionBuilder = (question) => createStructuredFeynmanQuestion(question);
-  const flashcard: StructuredQuestionBuilder = (question) => createStructuredFlashcardQuestion(question);
 
   if (mode === "FLASHCARDS") {
-    return createStructuredQuestionSet(selected, [flashcard], target);
-  }
-
-  if (mode === "FEYNMAN") {
-    return createStructuredQuestionSet(selected, [feynman], target);
-  }
-
-  if (composition === "MULTIPLE_CHOICE_ONLY") {
-    return createStructuredQuestionSet(selected, [multipleChoice], target);
-  }
-
-  if (mode === "QUICK_REVIEW") {
-    if (composition === "DISCURSIVE_ONLY") {
-      return createStructuredQuestionSet(selected, [shortAnswer], target);
-    }
-
-    return createStructuredQuestionSet(selected, [multipleChoice, trueFalse, fillBlank, shortAnswer], target);
-  }
-
-  if (mode === "DEEP_DIVE") {
-    if (composition === "DISCURSIVE_ONLY") {
-      return createStructuredQuestionSet(selected, [discursive, shortAnswer], target);
-    }
-
-    return createStructuredQuestionSet(selected, [multipleChoice, discursive, shortAnswer], target);
+    return readyQuestions.slice(0, target);
   }
 
   if (mode === "EXAM") {
-    if (composition === "DISCURSIVE_ONLY") {
-      return createStructuredQuestionSet(selected, [shortAnswer, discursive], target);
-    }
-
-    return createStructuredQuestionSet(selected, [multipleChoice, multipleChoice, shortAnswer, discursive, trueFalse], target);
+    return readyQuestions.slice(0, target);
   }
 
-  return createStructuredQuestionSet(selected, [shortAnswer], target);
+  if (mode === "FEYNMAN") {
+    return [...readyQuestions, ...createStructuredQuestionSet(selected, [feynman], target)].slice(0, target);
+  }
+
+  if (mode === "DEEP_DIVE" || composition === "MULTIPLE_CHOICE_ONLY") {
+    return ensureStructuredQuestionType(
+      [...readyQuestions, ...createStructuredQuestionSet(selected, [multipleChoice], target)].slice(0, target),
+      selected,
+      multipleChoice,
+      "MULTIPLE_CHOICE",
+      target,
+    );
+  }
+
+  if (mode === "QUICK_REVIEW") {
+    return ensureStructuredQuestionType(
+      [...readyQuestions, ...createStructuredQuestionSet(selected, [multipleChoice, feynman], target)].slice(0, target),
+      selected,
+      multipleChoice,
+      "MULTIPLE_CHOICE",
+      target,
+    );
+  }
+
+  return [...readyQuestions, ...createStructuredQuestionSet(selected, [feynman], target)].slice(0, target);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2653,15 +3750,15 @@ function getTargetQuestionCount(mode: QuizMode) {
 function getQuizModeTitle(mode: QuizMode) {
   switch (mode) {
     case "QUICK_REVIEW":
-      return "Revisão rápida";
+      return "Revisão geral";
     case "DEEP_DIVE":
-      return "Questionário profundo";
+      return "Múltipla escolha";
     case "EXAM":
-      return "Modo prova";
+      return "Verdadeiro/Falso";
     case "FEYNMAN":
-      return "Modo Feynman";
+      return "Revelar resposta";
     case "FLASHCARDS":
-      return "Flashcards";
+      return "Associação";
   }
 }
 
@@ -2670,10 +3767,19 @@ function finalizeGeneratedQuestions(
   mode: QuizMode,
   composition: QuizComposition = resolveCompositionForMode(mode),
 ) {
-  if (analysis.structuredQuestions.length >= MINIMUM_STRUCTURED_QUESTION_PAIRS) {
+  if (analysis.structuredQuestions.length >= MINIMUM_STRUCTURED_QUESTION_PAIRS || analysis.structuredDrafts.length > 0) {
     const resolvedComposition = resolveCompositionForMode(mode, composition);
-    const questions = uniqueStructuredQuestions(
-      buildStructuredQuestionCandidates(analysis.structuredQuestions, mode, resolvedComposition),
+    const questions = ensureFinalStructuredMultipleChoice(
+      uniqueStructuredQuestions(
+        buildStructuredQuestionCandidates(
+          analysis.structuredQuestions,
+          analysis.structuredDrafts,
+          mode,
+          resolvedComposition,
+        ),
+      ),
+      analysis.structuredQuestions,
+      mode,
     );
     const target = getTargetQuestionCount(mode);
 
@@ -2681,7 +3787,7 @@ function finalizeGeneratedQuestions(
       questions: questions.slice(0, target),
       generationNote:
         questions.length < target
-          ? `Este material importou ${questions.length} ${questions.length === 1 ? "perguntatil" : "perguntasteis"} neste modo. Mantivemos somente as perguntas com resposta confivel do arquivo.`
+          ? `Este material importou ${questions.length} ${questions.length === 1 ? "pergunta útil" : "perguntas úteis"} neste modo. Mantivemos somente as perguntas com resposta confiável do arquivo.`
           : undefined,
     };
   }
@@ -2717,7 +3823,7 @@ class MockQuizGenerator implements QuizGenerator {
           label: compositionLabels[composition],
           description: buildCompositionDescription(mode, composition),
           questionCount: preview.length,
-          questionTypes: [...new Set(preview.map((question) => question.type))],
+          questionTypes: getModeQuestionTypes(mode, preview),
           locked: getAllowedCompositions(mode).length === 1,
         };
       });
@@ -2725,62 +3831,67 @@ class MockQuizGenerator implements QuizGenerator {
     const options: QuizModeOption[] = [
       {
         mode: "QUICK_REVIEW",
-        title: "Revisão rápida",
+        title: "Revisão geral",
         tagline: "Objetiva, direta e variada",
-        description: "Pode combinar múltipla escolha, verdadeiro ou falso, lacunas e respostas curtas.",
+        description: "Combina os tipos disponíveis no questionário: múltipla escolha, verdadeiro/falso, associação e revelar resposta.",
         questionCount: getPreview("QUICK_REVIEW", "AUTO").length,
-        questionTypes: [...new Set(getPreview("QUICK_REVIEW", "AUTO").map((question) => question.type))],
+        questionTypes: getModeQuestionTypes("QUICK_REVIEW", getPreview("QUICK_REVIEW", "AUTO")),
         emphasis: analysis.emphasis,
         immediateFeedback: true,
         compositionOptions: buildCompositionOptions("QUICK_REVIEW"),
+        unavailableMessage: getModeUnavailableMessage("QUICK_REVIEW"),
       },
       {
         mode: "DEEP_DIVE",
-        title: "Questionário profundo",
-        tagline: "Explica, compara e aplica",
-        description: "Mistura objetivas e discursivas para cobrar entendimento mais completo.",
-        questionCount: getPreview("DEEP_DIVE", "AUTO").length,
-        questionTypes: [...new Set(getPreview("DEEP_DIVE", "AUTO").map((question) => question.type))],
+        title: "Múltipla escolha",
+        tagline: "Alternativas objetivas",
+        description: "Usa questões com alternativas prontas ou perguntas convertíveis com distratores plausíveis.",
+        questionCount: getPreview("DEEP_DIVE", "MULTIPLE_CHOICE_ONLY").length,
+        questionTypes: getModeQuestionTypes("DEEP_DIVE", getPreview("DEEP_DIVE", "MULTIPLE_CHOICE_ONLY")),
         emphasis: analysis.emphasis,
         immediateFeedback: true,
         compositionOptions: buildCompositionOptions("DEEP_DIVE"),
+        unavailableMessage: getModeUnavailableMessage("DEEP_DIVE"),
       },
       {
         mode: "EXAM",
-        title: "Modo prova",
-        tagline: "Resultado no final da rodada",
-        description: "Mantém a pressão de prova, mas com composição configurável.",
+        title: "Verdadeiro/Falso",
+        tagline: "Correção objetiva",
+        description: "Usa apenas afirmações marcadas como verdadeiro/falso ou certo/errado no arquivo.",
         questionCount: getPreview("EXAM", "AUTO").length,
-        questionTypes: [...new Set(getPreview("EXAM", "AUTO").map((question) => question.type))],
+        questionTypes: getModeQuestionTypes("EXAM", getPreview("EXAM", "AUTO")),
         emphasis: analysis.emphasis,
-        immediateFeedback: false,
+        immediateFeedback: true,
         compositionOptions: buildCompositionOptions("EXAM"),
+        unavailableMessage: getModeUnavailableMessage("EXAM"),
       },
       {
         mode: "FEYNMAN",
-        title: "Modo Feynman",
-        tagline: "Explique para consolidar",
-        description: "Fica sempre discursivo, com foco em ensinar a ideia de forma simples.",
+        title: "Revelar resposta",
+        tagline: "Pergunta, resposta e autoavaliação",
+        description: "Mostra a pergunta, revela o gabarito e permite marcar Errei, Quase ou Acertei.",
         questionCount: getPreview("FEYNMAN", "DISCURSIVE_ONLY").length,
-        questionTypes: [...new Set(getPreview("FEYNMAN", "DISCURSIVE_ONLY").map((question) => question.type))],
+        questionTypes: getModeQuestionTypes("FEYNMAN", getPreview("FEYNMAN", "DISCURSIVE_ONLY")),
         emphasis: analysis.emphasis,
         immediateFeedback: true,
         compositionOptions: buildCompositionOptions("FEYNMAN"),
+        unavailableMessage: getModeUnavailableMessage("FEYNMAN"),
       },
       {
         mode: "FLASHCARDS",
-        title: "Flashcards",
-        tagline: "Frente curta, verso completo",
-        description: "Mantém o formato fixo de cards para memória ativa.",
+        title: "Associação",
+        tagline: "Pares e correspondências",
+        description: "Usa blocos de associação para relacionar itens às respostas corretas.",
         questionCount: getPreview("FLASHCARDS", "AUTO").length,
-        questionTypes: [...new Set(getPreview("FLASHCARDS", "AUTO").map((question) => question.type))],
+        questionTypes: getModeQuestionTypes("FLASHCARDS", getPreview("FLASHCARDS", "AUTO")),
         emphasis: analysis.emphasis,
         immediateFeedback: true,
         compositionOptions: buildCompositionOptions("FLASHCARDS"),
+        unavailableMessage: getModeUnavailableMessage("FLASHCARDS"),
       },
     ];
 
-    return options.filter((option) => option.questionCount > 0);
+    return options;
   }
 
   generateQuizFromDocument(document: Document, mode: QuizMode, composition?: QuizComposition): GeneratedQuiz {
@@ -2812,6 +3923,10 @@ export function generateQuizFromDocument(document: Document, mode: QuizMode, com
 
 export function getMinimumQuestionTarget(mode: QuizMode) {
   return getTargetQuestionCount(mode);
+}
+
+export function getUnavailableModeMessage(mode: QuizMode) {
+  return getModeUnavailableMessage(mode);
 }
 
 

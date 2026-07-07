@@ -1,9 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { evaluateAnswer } from "@/lib/quiz/evaluation";
-import {
-  serializeAnswerAttempt,
-  serializeQuestionForEvaluation,
-} from "@/lib/serializers";
+import { serializeAnswerAttempt, serializeQuestionForEvaluation } from "@/lib/serializers";
 
 export const runtime = "nodejs";
 
@@ -43,11 +40,19 @@ export async function POST(
 
   const question = serializeQuestionForEvaluation(questionRecord);
 
-  if (question.type === "FLASHCARD" && !body.selfAssessment) {
-    return Response.json({ error: "Escolha errei, quase ou acertei para seguir." }, { status: 400 });
+  if (
+    (question.type === "FLASHCARD" || question.type === "REVEAL_ANSWER" || question.type === "SHORT_ANSWER") &&
+    !body.selfAssessment
+  ) {
+    return Response.json({ error: "Escolha Errei, Quase ou Acertei para seguir." }, { status: 400 });
   }
 
-  if (question.type !== "FLASHCARD" && !body.responseText?.trim()) {
+  if (
+    question.type !== "FLASHCARD" &&
+    question.type !== "REVEAL_ANSWER" &&
+    question.type !== "SHORT_ANSWER" &&
+    !body.responseText?.trim()
+  ) {
     return Response.json({ error: "Preencha sua resposta antes de continuar." }, { status: 400 });
   }
 
@@ -91,6 +96,6 @@ export async function POST(
 
   return Response.json({
     attempt: serializeAnswerAttempt(attempt),
-    showImmediateFeedback: session.mode !== "EXAM",
+    showImmediateFeedback: true,
   });
 }

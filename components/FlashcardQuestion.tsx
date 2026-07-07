@@ -36,14 +36,14 @@ export function FlashcardQuestion({
           onClick={() => setRevealed(true)}
           className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Revelar verso do card
+          Mostrar resposta
         </button>
       ) : null}
 
       {revealed ? (
         <div className="space-y-3 rounded-[1.75rem] border border-cyan-100 bg-cyan-50/80 p-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">Resposta esperada</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">Resposta</p>
             <p className="mt-3 text-sm leading-7 text-slate-700">
               {question.expectedAnswer ?? "Sem resposta sugerida."}
             </p>

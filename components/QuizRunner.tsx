@@ -3,13 +3,12 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, LoaderCircle } from "lucide-react";
 
-import { DiscursiveQuestion } from "@/components/DiscursiveQuestion";
 import { FillBlankQuestion } from "@/components/FillBlankQuestion";
 import { FlashcardQuestion } from "@/components/FlashcardQuestion";
+import { MatchingQuestion } from "@/components/MatchingQuestion";
 import { MultipleChoiceQuestion } from "@/components/MultipleChoiceQuestion";
 import { QuestionCard } from "@/components/QuestionCard";
 import { QuizProgress } from "@/components/QuizProgress";
-import { ShortAnswerQuestion } from "@/components/ShortAnswerQuestion";
 import { TrueFalseQuestion } from "@/components/TrueFalseQuestion";
 import type {
   AnswerAttempt,
@@ -108,6 +107,18 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
       );
     }
 
+    if (currentQuestion.type === "MATCHING") {
+      return (
+        <MatchingQuestion
+          key={currentQuestion.id}
+          attempt={currentAttempt}
+          disabled={isSubmitting || Boolean(currentAttempt)}
+          onSubmit={(responseText) => submitAnswer({ responseText })}
+          question={currentQuestion}
+        />
+      );
+    }
+
     if (currentQuestion.type === "TRUE_FALSE") {
       return (
         <TrueFalseQuestion
@@ -130,7 +141,11 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
       );
     }
 
-    if (currentQuestion.type === "FLASHCARD") {
+    if (
+      currentQuestion.type === "FLASHCARD" ||
+      currentQuestion.type === "REVEAL_ANSWER" ||
+      currentQuestion.type === "SHORT_ANSWER"
+    ) {
       return (
         <FlashcardQuestion
           key={currentQuestion.id}
@@ -142,26 +157,7 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
       );
     }
 
-    if (currentQuestion.responseFormat === "SHORT") {
-      return (
-        <ShortAnswerQuestion
-          key={currentQuestion.id}
-          attempt={currentAttempt}
-          disabled={isSubmitting || Boolean(currentAttempt)}
-          onSubmit={(responseText) => submitAnswer({ responseText })}
-        />
-      );
-    }
-
-    return (
-      <DiscursiveQuestion
-        key={currentQuestion.id}
-        attempt={currentAttempt}
-        disabled={isSubmitting || Boolean(currentAttempt)}
-        onSubmit={(responseText) => submitAnswer({ responseText })}
-        question={currentQuestion}
-      />
-    );
+    return null;
   }
 
   if (!currentQuestion) {
@@ -200,7 +196,7 @@ export function QuizRunner({ onComplete, onExit, session }: QuizRunnerProps) {
       <QuestionCard
         attempt={currentAttempt}
         question={currentQuestion}
-        showImmediateFeedback={session.mode !== "EXAM"}
+        showImmediateFeedback
       >
         {renderQuestion()}
       </QuestionCard>

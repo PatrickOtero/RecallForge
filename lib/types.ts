@@ -12,6 +12,8 @@ export const questionTypes = [
   "FILL_BLANK",
   "SHORT_ANSWER",
   "FLASHCARD",
+  "REVEAL_ANSWER",
+  "MATCHING",
 ] as const;
 
 export const quizCompositions = [
@@ -55,6 +57,7 @@ export interface QuizModeOption {
   emphasis: string[];
   immediateFeedback: boolean;
   compositionOptions: QuizCompositionOption[];
+  unavailableMessage?: string;
 }
 
 export interface QuizCompositionOption {
@@ -71,11 +74,18 @@ export interface QuestionChoice {
   label: string;
 }
 
+export interface MatchingPair {
+  id: string;
+  left: string;
+  right: string;
+}
+
 export interface QuestionDraft {
   type: QuestionType;
   prompt: string;
   topic: string;
   choices?: QuestionChoice[];
+  matchingPairs?: MatchingPair[];
   responseFormat?: QuestionResponseFormat;
   correctAnswer?: string;
   explanation?: string;
@@ -91,6 +101,7 @@ export interface Question {
   prompt: string;
   topic: string;
   choices?: QuestionChoice[];
+  matchingPairs?: MatchingPair[];
   responseFormat?: QuestionResponseFormat;
   expectedAnswer?: string;
   rubric?: string;

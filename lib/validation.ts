@@ -65,6 +65,10 @@ export function resolveQuizComposition(mode: QuizMode, composition?: QuizComposi
     return "DISCURSIVE_ONLY" as const;
   }
 
+  if (mode === "DEEP_DIVE") {
+    return "MULTIPLE_CHOICE_ONLY" as const;
+  }
+
   if (mode === "FLASHCARDS") {
     return "AUTO" as const;
   }

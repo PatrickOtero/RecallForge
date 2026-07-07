@@ -27,7 +27,7 @@ export function QuizResultSummary({
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Resultado final</p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">{session.title}</h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-              Veja onde voce foi bem e quais pontos merecem uma revisao mais atenta.
+              Veja onde você foi bem e quais pontos merecem uma revisão mais atenta.
             </p>
           </div>
 
@@ -83,7 +83,7 @@ export function QuizResultSummary({
         <div className="rounded-[1.75rem] bg-white/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
           <div className="flex items-center gap-3">
             <Sparkles className="h-5 w-5 text-cyan-600" />
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">Proximos passos</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">Próximos passos</p>
           </div>
           <div className="mt-4 space-y-3">
             {summary.recommendations.map((recommendation) => (

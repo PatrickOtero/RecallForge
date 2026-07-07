@@ -1,24 +1,33 @@
 import { extractTextFromDocx, extractTextFromPdf, extractTextFromTxt } from "@/lib/documents/text-extraction";
 import { cleanExtractedText, splitTextIntoChunks } from "@/lib/normalization/text-normalizer";
 import { prisma } from "@/lib/prisma";
-import { serializeDocument } from "@/lib/serializers";
 import {
+  detectStructuredQuestionnaire,
   generateQuizOptions,
-  MINIMUM_STRUCTURED_QUESTION_PAIRS,
-  parseStructuredQuestionnaire,
 } from "@/lib/quiz/mock-quiz-generator";
+import { serializeDocument } from "@/lib/serializers";
 import type { DocumentSource } from "@/lib/types";
 import {
   buildExtractionFailureMessage,
   deriveDocumentTitle,
   inferDocumentSource,
+  MIN_TEXT_LENGTH,
   validateManualText,
   validateUploadedBuffer,
   validateUploadedFile,
-  MIN_TEXT_LENGTH,
 } from "@/lib/validation";
 
 export const runtime = "nodejs";
+
+function invalidQuestionnaireResponse() {
+  return Response.json(
+    {
+      error:
+        "Este material não parece estar em formato de questionário. O RecallForge trabalha com questionários prontos. Envie perguntas e respostas, alternativas com gabarito, verdadeiro/falso, associação ou pares de frente e verso.",
+    },
+    { status: 400 },
+  );
+}
 
 export async function POST(request: Request) {
   const formData = await request.formData();
@@ -73,9 +82,9 @@ export async function POST(request: Request) {
   }
 
   const cleanedText = cleanExtractedText(rawText);
-  const structuredQuestions = parseStructuredQuestionnaire(cleanedText);
+  const hasStructuredQuestionnaire = detectStructuredQuestionnaire(cleanedText);
 
-  if (cleanedText.length < MIN_TEXT_LENGTH && structuredQuestions.length === 0) {
+  if (cleanedText.length < MIN_TEXT_LENGTH && !hasStructuredQuestionnaire) {
     return Response.json(
       {
         error: buildExtractionFailureMessage(sourceType),
@@ -84,24 +93,8 @@ export async function POST(request: Request) {
     );
   }
 
-  if (structuredQuestions.length === 0) {
-    return Response.json(
-      {
-        error:
-          "Este material não parece estar em formato de perguntas e respostas. O RecallForge trabalha com questionários prontos. Reestruture o conteúdo usando P:/R: ou Pergunta:/Resposta: e tente novamente.",
-      },
-      { status: 400 },
-    );
-  }
-
-  if (structuredQuestions.length < MINIMUM_STRUCTURED_QUESTION_PAIRS) {
-    return Response.json(
-      {
-        error:
-          "Não encontrei perguntas e respostas suficientes neste material. Envie um arquivo estruturado com perguntas e respostas.",
-      },
-      { status: 400 },
-    );
+  if (!hasStructuredQuestionnaire) {
+    return invalidQuestionnaireResponse();
   }
 
   const chunks = splitTextIntoChunks(cleanedText);

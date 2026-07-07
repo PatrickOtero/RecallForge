@@ -13,6 +13,7 @@ interface QuestionCardProps {
 
 export function QuestionCard({ attempt, children, question, showImmediateFeedback }: QuestionCardProps) {
   const answered = Boolean(attempt);
+  const isSelfAssessed = Boolean(attempt?.selfAssessment);
   const isPositive = (attempt?.score ?? 0) >= 0.7;
 
   return (
@@ -57,16 +58,20 @@ export function QuestionCard({ attempt, children, question, showImmediateFeedbac
 
             <div className="space-y-2 text-sm leading-6">
               <p className="font-semibold text-slate-800">
-                {showImmediateFeedback
-                  ? isPositive
-                    ? "Boa resposta"
-                    : "Vale revisar este ponto"
-                  : "Resposta guardada"}
+                {isSelfAssessed
+                  ? "Autoavaliação registrada"
+                  : showImmediateFeedback
+                    ? isPositive
+                      ? "Boa resposta"
+                      : "Vale revisar este ponto"
+                    : "Resposta guardada"}
               </p>
               <p className="text-slate-600">
-                {showImmediateFeedback
-                  ? attempt?.feedback ?? "Resposta recebida."
-                  : "Sua resposta fica guardada e o resultado aparece no final da rodada."}
+                {isSelfAssessed
+                  ? attempt?.feedback ?? "Sua autoavaliação foi guardada."
+                  : showImmediateFeedback
+                    ? attempt?.feedback ?? "Resposta recebida."
+                    : "Sua resposta fica guardada e o resultado aparece no final da rodada."}
               </p>
               {showImmediateFeedback && question.expectedAnswer ? (
                 <p className="text-slate-600">

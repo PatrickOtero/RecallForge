@@ -8,6 +8,7 @@ import {
   generateQuizOptions,
   MINIMUM_STRUCTURED_QUESTION_PAIRS,
   parseStructuredQuestionnaire,
+  stripQuestionnaireLabel,
 } from "@/lib/quiz/mock-quiz-generator";
 import type { Document, QuestionDraft } from "@/lib/types";
 import { normalizeForComparison } from "@/lib/utils";
@@ -16,7 +17,7 @@ import { validateManualText } from "@/lib/validation";
 function buildDocument(cleanedText: string): Document {
   return {
     id: "doc-test",
-    title: "Questionario de revisao",
+    title: "Questionário de revisão",
     sourceType: "MANUAL_TEXT",
     originalFileName: null,
     mimeType: null,
@@ -49,18 +50,16 @@ function withMockedRandom<T>(values: number[], callback: () => T) {
   }
 }
 
-test("aceita questionarios estruturados com o minimo recomendado de pares claros", () => {
+test("aceita P/R, Pergunta/Resposta e Q/A como perguntas de resposta revelada", () => {
   const cleanedText = cleanExtractedText(`
-  1. O que e a fotossintese?
-  Resposta:
-  Processo pelo qual organismos autotroficos produzem glicose usando luz.
+  P: O que e ruptura?
+  R: Falta de produto no momento da compra.
 
-  2. Quais sao as fases da fotossintese?
-  Resposta esperada:
-  Fase clara e fase escura.
+  Pergunta: Como e calculada a cobertura de estoque?
+  Resposta: Estoque do produto dividido pela saida media.
 
-  Q: Onde ocorre a fase clara?
-  A: Nos tilacoides dos cloroplastos.
+  Q: O que o inventario confronta?
+  A: Estoque fisico e estoque logico.
   `);
 
   assert.equal(MINIMUM_STRUCTURED_QUESTION_PAIRS, 3);
@@ -69,338 +68,280 @@ test("aceita questionarios estruturados com o minimo recomendado de pares claros
 
   const parsed = parseStructuredQuestionnaire(cleanedText);
   assert.equal(parsed.length, 3);
-  assert.equal(parsed[0]?.prompt, "O que e a fotossintese?");
-  assert.match(parsed[1]?.expectedAnswer ?? "", /fase clara e fase escura/i);
-  assert.match(parsed[2]?.expectedAnswer ?? "", /tilacoides/i);
+  assert.equal(parsed[0]?.prompt, "O que e ruptura?");
+  assert.match(parsed[1]?.expectedAnswer ?? "", /saida media/i);
+
+  const review = generateQuizFromDocument(buildDocument(cleanedText), "FEYNMAN", "DISCURSIVE_ONLY");
+  assert.ok(review.questions.length > 0);
+  assert.ok(review.questions.every((question) => question.type === "REVEAL_ANSWER"));
 });
 
-test("remove apenas prefixos explicitos sem cortar letras reais do conteudo", () => {
+test("nao converte P/R comum em verdadeiro/falso artificial", () => {
   const cleanedText = cleanExtractedText(`
-  [Vinhos]
+  P: Aula 21 - Que barreira natural protege os vinhedos de Bordeaux contra ventos e tempestades atlanticas?
+  R: A barreira florestal de pinheiros.
 
-  P: O que e Riesling?
-  R: Riesling e uma casta branca aromatica.
+  P: Qual rio divide a margem esquerda e a margem direita em Bordeaux?
+  R: O rio Gironde.
 
-  P: O que e Roussillon?
-  Resposta: Roussillon e uma regiao do sul da Franca.
+  P: Que uva tinta domina a margem esquerda?
+  R: Cabernet Sauvignon.
 
-  P: O que e ruptura?
-  A: Ruptura e a falta de um produto no momento da compra.
-
-  Pergunta: O que e recebimento?
-  Gabarito: Recebimento e a etapa de conferencia e entrada da mercadoria.
+  P: Que uva tinta domina a margem direita?
+  R: Merlot.
   `);
 
-  const parsed = parseStructuredQuestionnaire(cleanedText);
-  assert.equal(parsed.length, 4);
-  assert.equal(parsed[0]?.prompt, "O que e Riesling?");
-  assert.equal(parsed[0]?.expectedAnswer, "Riesling e uma casta branca aromatica.");
-  assert.equal(parsed[1]?.expectedAnswer, "Roussillon e uma regiao do sul da Franca.");
-  assert.equal(parsed[2]?.expectedAnswer, "Ruptura e a falta de um produto no momento da compra.");
-  assert.equal(parsed[3]?.expectedAnswer, "Recebimento e a etapa de conferencia e entrada da mercadoria.");
-});
+  assert.equal(detectStructuredQuestionnaire(cleanedText), true);
 
-test("trata P/R e secoes em colchetes sem vazar prefixos na multipla escolha", () => {
-  const cleanedText = cleanExtractedText(`
-  [Roubos, assaltos e salvaguarda de imagens]
+  const review = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
 
-  P: Qual expressao e indicada em abordagem corretiva?
-  R: O Senhor/Senhora esqueceu-se de registrar o produto tal.
-
-  P: Quem deve fazer a coleta de imagens quando houver solicitacao legal?
-  R: A coleta deve ser feita apenas por responsavel autorizado, seguindo a solicitacao formal.
-
-  P: O que deve ser feito alem de salvar imagens de ocorrencias relevantes?
-  R: O registro precisa ser documentado e preservado com identificacao da ocorrencia.
-
-  P: Por que o AEP/AP deve conhecer metodos de furto?
-  R: Para reconhecer comportamentos suspeitos e agir com seguranca e padrao.
-
-  [Faixas de reposicao e sugestao de pedido]
-
-  P: No exemplo do biscoito com embalagem 42 e saida media 3, qual e a cobertura aproximada e a faixa de reposicao?
-  R: A cobertura e 14 dias, portanto maior que 11 dias, enquadrando o item em 30% de reposicao.
-
-  P: No exemplo do produto com estoque 35 e saida media 5, qual e a cobertura aproximada e a faixa de reposicao?
-  R: A cobertura e 7 dias, portanto maior que 5 e menor que 11 dias, enquadrando o item em 50% de reposicao.
-
-  P: No exemplo do item com estoque 21 e saida media 5, qual e a cobertura aproximada e a faixa de reposicao?
-  R: A cobertura e 4,2 dias, portanto menor que 5 dias, enquadrando o item em 95% de reposicao.
-
-  P: Como calcular o estoque padrao final quando a saida media e 50 e a cobertura e 5?
-  R: O estoque padrao final e 250, pois 50 * 5 = 250.
-  `);
-
-  const parsed = parseStructuredQuestionnaire(cleanedText);
-  assert.equal(parsed.length, 8);
-  assert.equal(parsed[0]?.sectionTitle, "Roubos, Assaltos E Salvaguarda De Imagens");
-  assert.equal(parsed[0]?.prompt, "Qual expressao e indicada em abordagem corretiva?");
-  assert.equal(parsed[0]?.expectedAnswer, "O Senhor/Senhora esqueceu-se de registrar o produto tal.");
-  assert.equal(parsed[4]?.sectionTitle, "Faixas De Reposicao E Sugestao De Pedido");
-
-  const exam = generateQuizFromDocument(buildDocument(cleanedText), "EXAM", "MULTIPLE_CHOICE_ONLY");
-
-  const abordagem = findQuestion(exam.questions, "qual expressao e indicada em abordagem corretiva");
-  assert.ok(abordagem);
-  assert.equal(abordagem?.type, "MULTIPLE_CHOICE");
-  assert.equal(abordagem?.prompt, "Qual expressao e indicada em abordagem corretiva?");
-  assert.equal(abordagem?.correctAnswer, "O Senhor/Senhora esqueceu-se de registrar o produto tal.");
-
-  const biscoito = findQuestion(exam.questions, "no exemplo do biscoito com embalagem 42 e saida media 3");
-  assert.ok(biscoito);
-  assert.equal(biscoito?.type, "MULTIPLE_CHOICE");
+  assert.ok(review.questions.length > 0);
+  assert.ok(review.questions.every((question) => question.type !== "TRUE_FALSE"));
   assert.equal(
-    biscoito?.prompt,
-    "No exemplo do biscoito com embalagem 42 e saida media 3, qual e a cobertura aproximada e a faixa de reposicao?",
+    review.questions.some((question) => question.prompt === "Verdadeiro ou falso: A barreira florestal de pinheiros."),
+    false,
   );
-  assert.equal(
-    biscoito?.correctAnswer,
-    "A cobertura e 14 dias, portanto maior que 11 dias, enquadrando o item em 30% de reposicao.",
-  );
-
-  for (const question of exam.questions) {
-    assert.ok(!question.prompt.includes("P:"));
-    assert.ok(!question.prompt.includes("R:"));
-
-    if (question.type === "MULTIPLE_CHOICE" && question.choices) {
-      assert.equal(question.choices.length, 4);
-      assert.equal(
-        question.choices.filter((choice) => choice.label === question.correctAnswer).length,
-        1,
-      );
-
-      for (const choice of question.choices) {
-        assert.ok(!choice.label.includes("P:"));
-        assert.ok(!choice.label.includes("R:"));
-        assert.ok(!choice.label.trim().endsWith("?"));
-      }
-    }
-  }
 });
 
-test("importa questionarios estruturados sem inventar perguntas novas", () => {
+test("aceita P/R como verdadeiro/falso apenas quando a pergunta e explicitamente V/F", () => {
   const cleanedText = cleanExtractedText(`
-  Use da seguinte forma:
-  1. Tente responder sem olhar a resposta.
-  2. Confira o gabarito logo abaixo.
+  P: Verdadeiro ou falso: Ruptura significa falta de produto no momento da compra pelo consumidor.
+  R: Verdadeiro.
 
-  BLOCO 1 - FICHA DE DEGUSTACAO
+  P: Certo ou errado: O inventario confronta estoque fisico com estoque logico.
+  R: Certo.
 
-  1. Quais sao as cinco partes principais da ficha de degustacao e quantos pontos vale cada uma?
-  Resposta:
-  Exame visual - 5 pontos.
-  Exame olfativo - 5 pontos.
-  Exame gustativo - 5 pontos.
-  Observacoes, sensacoes finais e evolucao - 3 pontos.
-  Harmonizacao - 2 pontos.
-
-  2. O que deve ser registrado na parte de observacoes finais?
-  Resposta:
-  Sensacoes persistentes, equilibrio do vinho e sua evolucao na taca.
-
-  3. Como a harmonizacao deve ser avaliada na ficha?
-  Resposta:
-  Pela coerencia entre prato e vinho, considerando intensidade, textura e persistencia.
-
-  BLOCO 2 - EXAME VISUAL
-
-  4. Qual regiao da taca deve ser observada primeiro no exame visual?
-  Resposta:
-  O centro e depois a borda, para perceber intensidade e evolucao da cor.
-
-  5. O que a limpidez indica no exame visual?
-  Resposta:
-  Se o vinho esta brilhante, limpo e sem particulas em suspensao.
-
-  6. Quais castas tintas sao mais tradicionais em Bordeaux?
-  Resposta:
-  Cabernet Sauvignon, Merlot, Cabernet Franc, Petit Verdot e Malbec.
+  P: V/F: O estoque fisico e sempre igual ao estoque logico.
+  R: Falso.
   `);
 
-  const deepDive = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE", "AUTO");
-  const quickReview = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
-  const flashcards = generateQuizFromDocument(buildDocument(cleanedText), "FLASHCARDS");
+  assert.equal(detectStructuredQuestionnaire(cleanedText), true);
 
-  assert.ok(findQuestion(deepDive.questions, "cinco partes principais da ficha de degustacao"));
-  assert.ok(quickReview.questions.some((question) => ["MULTIPLE_CHOICE", "TRUE_FALSE", "FILL_BLANK", "SHORT_ANSWER"].includes(question.type)));
-  assert.ok(findQuestion(flashcards.questions, "limpidez indica"));
+  const review = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
+  const trueFalseQuestions = review.questions.filter((question) => question.type === "TRUE_FALSE");
 
-  for (const question of [...deepDive.questions, ...quickReview.questions, ...flashcards.questions]) {
-    assert.ok(!/resuma em uma frase|que problema .* ajuda a resolver|qual alternativa descreve corretamente/i.test(question.prompt));
-    assert.ok(!/use da seguinte forma|tente responder sem olhar|confira o gabarito/i.test(question.prompt));
-  }
+  assert.equal(trueFalseQuestions.length, 3);
+  assert.ok(trueFalseQuestions.some((question) => question.correctAnswer === "false"));
+  assert.ok(trueFalseQuestions.every((question) => !question.prompt.startsWith("P:")));
 });
 
-test("separa modo de estudo e composicao dos tipos de pergunta", () => {
+test("rejeita verdadeiro/falso explicito quando a afirmacao e so uma resposta curta nominal", () => {
   const cleanedText = cleanExtractedText(`
-  [Fundamentos da gestao de estoques]
-  P: O que e ruptura?
-  R: E a falta de um produto no momento da compra pelo consumidor.
+  Verdadeiro ou falso:
+  A barreira florestal de pinheiros.
+  Resposta: Verdadeiro
 
-  P: O que a cobertura de estoque mede?
-  R: Mede por quantos dias o estoque atual atende a demanda futura.
+  2. Riesling. (V)
 
-  P: O que o relatorio de produtos nao atendidos verifica?
-  R: Verifica itens sugeridos para a loja que nao foram enviados pelo CD.
-
-  P: Como a saida media e calculada?
-  R: Ela considera o historico de vendas para estimar a media diaria de cada item.
-
-  [Faixas de reposicao]
-  P: No exemplo com estoque 35 e saida media 5, qual e a faixa de reposicao?
-  R: A cobertura e 7 dias, entao a faixa de reposicao fica em 50%.
-
-  P: No exemplo com estoque 21 e saida media 5, qual e a faixa de reposicao?
-  R: A cobertura e 4,2 dias, entao a faixa de reposicao fica em 95%.
-
-  P: No exemplo com estoque 42 e saida media 3, qual e a faixa de reposicao?
-  R: A cobertura e 14 dias, entao a faixa de reposicao fica em 30%.
-
-  P: Como calcular o estoque padrao final?
-  R: Multiplicando a saida media pela cobertura definida para o item.
+  C/E:
+  Cerca de 15% dos vinhedos.
+  Resposta: C
   `);
 
-  const quickReviewAuto = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
-  const quickReviewMcOnly = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "MULTIPLE_CHOICE_ONLY");
-  const deepDiveAuto = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE", "AUTO");
-  const deepDiveDiscursive = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE", "DISCURSIVE_ONLY");
-  const feynmanForced = generateQuizFromDocument(buildDocument(cleanedText), "FEYNMAN", "MULTIPLE_CHOICE_ONLY");
-
-  assert.ok(quickReviewAuto.questions.some((question) => question.type === "MULTIPLE_CHOICE"));
-  assert.ok(
-    quickReviewAuto.questions.some(
-      (question) => question.type === "TRUE_FALSE" || question.type === "FILL_BLANK" || question.responseFormat === "SHORT",
-    ),
-  );
-
-  assert.ok(quickReviewMcOnly.questions.length > 0);
-  assert.ok(quickReviewMcOnly.questions.every((question) => question.type === "MULTIPLE_CHOICE"));
-
-  assert.ok(deepDiveAuto.questions.some((question) => question.type === "MULTIPLE_CHOICE"));
-  assert.ok(
-    deepDiveAuto.questions.some(
-      (question) => question.type === "SHORT_ANSWER" && (question.responseFormat === "SHORT" || question.responseFormat === "LONG"),
-    ),
-  );
-
-  assert.ok(deepDiveDiscursive.questions.every((question) => question.type === "SHORT_ANSWER"));
-  assert.ok(deepDiveDiscursive.questions.some((question) => question.responseFormat === "LONG"));
-
-  assert.equal(feynmanForced.composition, "DISCURSIVE_ONLY");
-  assert.ok(feynmanForced.questions.every((question) => question.type === "SHORT_ANSWER"));
-  assert.ok(feynmanForced.questions.every((question) => question.responseFormat === "LONG"));
-  assert.ok(feynmanForced.questions.every((question) => /^Explique com suas palavras:/i.test(question.prompt)));
-
-  const options = generateQuizOptions(buildDocument(cleanedText));
-  const quickReviewOption = options.find((option) => option.mode === "QUICK_REVIEW");
-  const feynmanOption = options.find((option) => option.mode === "FEYNMAN");
-
-  assert.equal(quickReviewOption?.compositionOptions.length, 3);
-  assert.equal(feynmanOption?.compositionOptions.length, 1);
-  assert.equal(feynmanOption?.compositionOptions[0]?.composition, "DISCURSIVE_ONLY");
+  assert.equal(detectStructuredQuestionnaire(cleanedText), false);
+  assert.equal(generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO").questions.length, 0);
 });
 
-test("trata blocos de associacao sem carregar a instrucao para o prompt individual", () => {
+test("remove apenas prefixos explicitos sem cortar letras reais nem destruir Unicode", () => {
+  assert.equal(stripQuestionnaireLabel("R: Riesling"), "Riesling");
+  assert.equal(stripQuestionnaireLabel("Resposta: Riesling"), "Riesling");
+  assert.equal(stripQuestionnaireLabel("Riesling"), "Riesling");
+  assert.equal(stripQuestionnaireLabel("Roussillon"), "Roussillon");
+  assert.equal(stripQuestionnaireLabel("Regiao do Jura"), "Regiao do Jura");
+  assert.equal(stripQuestionnaireLabel("Ruptura"), "Ruptura");
+  assert.equal(stripQuestionnaireLabel("P: O que e ruptura?"), "O que e ruptura?");
+  assert.equal(stripQuestionnaireLabel("Pergunta: O que e ruptura?"), "O que e ruptura?");
+
+  const unicode = "Château-Chalon, Gewürztraminer, São João, Roussillon";
+  assert.equal(stripQuestionnaireLabel(unicode), unicode);
+});
+
+test("preserva multipla escolha pronta com gabarito em vez de gerar novos distratores", () => {
+  const cleanedText = cleanExtractedText(`
+  1. O que e ruptura?
+  A) Excesso de produto em estoque.
+  B) Falta de produto no momento da compra pelo consumidor.
+  C) Transferencia interna entre setores.
+  D) Contagem fisica das mercadorias.
+  Gabarito: B
+  `);
+
+  assert.equal(detectStructuredQuestionnaire(cleanedText), true);
+
+  const multipleChoice = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE", "MULTIPLE_CHOICE_ONLY");
+  assert.equal(multipleChoice.questions.length, 1);
+
+  const question = multipleChoice.questions[0];
+  assert.equal(question?.type, "MULTIPLE_CHOICE");
+  assert.equal(question?.prompt, "O que e ruptura?");
+  assert.equal(question?.choices?.length, 4);
+  assert.equal(question?.correctAnswer, "Falta de produto no momento da compra pelo consumidor.");
+});
+
+test("parseia verdadeiro/falso e certo/errado com correcao objetiva", () => {
+  const cleanedText = cleanExtractedText(`
+  Verdadeiro ou falso:
+  Ruptura significa falta de produto no momento da compra pelo consumidor.
+  Resposta: Verdadeiro
+
+  2. O inventario ignora o estoque fisico. (F)
+
+  Certo ou errado:
+  O inventario confronta estoque fisico com estoque logico.
+  Gabarito: Certo
+  `);
+
+  assert.equal(detectStructuredQuestionnaire(cleanedText), true);
+
+  const review = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
+  const trueFalseQuestions = review.questions.filter((question) => question.type === "TRUE_FALSE");
+
+  assert.ok(trueFalseQuestions.length >= 3);
+  assert.ok(trueFalseQuestions.some((question) => question.correctAnswer === "true"));
+  assert.ok(trueFalseQuestions.some((question) => question.correctAnswer === "false"));
+});
+
+test("transforma associacao item/resposta em uma questao MATCHING", () => {
   const cleanedText = cleanExtractedText(`
   BLOCO 14 - QUESTOES DE ASSOCIACAO
 
   Associe cada item a resposta correta.
 
-  201. Provence
+  1. Provence
   Resposta:
   Lider francesa e mundial em roses secos e frutados.
 
-  202. Roussillon
+  2. Roussillon
   Resposta:
-  Regiao responsavel por 78% da producao francesa de VDN.
-
-  203. Picpoul de Pinet
-  Resposta:
-  AOP do Languedoc dedicada a vinho branco de Piquepoul Blanc.
-
-  204. Sancerre
-  Resposta:
-  Regiao do Loire Central associada a Sauvignon Blanc.
+  Regiao associada a producao de VDN.
   `);
 
-  const parsed = parseStructuredQuestionnaire(cleanedText);
-  assert.equal(parsed.length, 4);
-  assert.equal(parsed[0]?.promptStyle, "ASSOCIATION");
-  assert.equal(parsed[0]?.associationItem, "Provence");
+  assert.equal(detectStructuredQuestionnaire(cleanedText), true);
 
-  const deepDive = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE");
-  const flashcards = generateQuizFromDocument(buildDocument(cleanedText), "FLASHCARDS");
-  const exam = generateQuizFromDocument(buildDocument(cleanedText), "EXAM", "MULTIPLE_CHOICE_ONLY");
+  const review = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
+  const matching = review.questions.find((question) => question.type === "MATCHING");
 
-  const shortAnswer = findQuestion(deepDive.questions, "provence esta associada a que");
-  assert.ok(shortAnswer);
-  assert.match(shortAnswer?.correctAnswer ?? "", /lider francesa e mundial/i);
-
-  const flashcard = flashcards.questions.find((question) => normalizeForComparison(question.prompt) === "provence");
-  assert.ok(flashcard);
-  assert.match(flashcard?.correctAnswer ?? "", /roses secos e frutados/i);
-
-  const multipleChoice = findQuestion(exam.questions, "provence esta associada a qual descricao");
-  assert.ok(multipleChoice);
-  assert.equal(multipleChoice?.type, "MULTIPLE_CHOICE");
-  assert.ok(
-    multipleChoice?.choices?.every(
-      (choice) => !/associe cada item|resposta correta|201\. provence/i.test(choice.label),
-    ),
+  assert.ok(matching);
+  assert.equal(matching?.prompt, "Associe cada item a descricao correta.");
+  assert.equal(matching?.matchingPairs?.length, 2);
+  assert.deepEqual(
+    matching?.matchingPairs?.map((pair) => pair.left),
+    ["Provence", "Roussillon"],
   );
 });
 
-test("sorteia perguntas do banco inteiro em vez de repetir sempre o inicio do questionario", () => {
+test("parseia associacao em colunas com gabarito", () => {
+  const cleanedText = cleanExtractedText(`
+  Associe:
+
+  Coluna A
+  A) Provence
+  B) Roussillon
+  C) Château-Chalon
+
+  Coluna B
+  1) Regiao associada a producao de VDN.
+  2) Lider francesa e mundial em roses secos e frutados.
+  3) Denominacao do Jura dedicada ao Vin Jaune.
+
+  Gabarito:
+  A-2
+  B-1
+  C-3
+  `);
+
+  assert.equal(detectStructuredQuestionnaire(cleanedText), true);
+
+  const review = generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW", "AUTO");
+  const matching = review.questions.find((question) => question.type === "MATCHING");
+
+  assert.ok(matching);
+  assert.equal(matching?.matchingPairs?.length, 3);
+  assert.equal(matching?.matchingPairs?.find((pair) => pair.left === "Château-Chalon")?.right, "Denominacao do Jura dedicada ao Vin Jaune.");
+});
+
+test("parseia frente/verso e termo/definicao como revelar resposta quando ha volume minimo", () => {
+  const cleanedText = cleanExtractedText(`
+  Frente: Ruptura
+  Verso: Falta de produto no momento da compra pelo consumidor.
+
+  Termo: Gewürztraminer
+  Definicao: Casta branca aromatica de perfil intenso.
+
+  Frente:
+  São João
+  Verso:
+  Nome preservado com acento e espaco.
+  `);
+
+  assert.equal(detectStructuredQuestionnaire(cleanedText), true);
+
+  const reveal = generateQuizFromDocument(buildDocument(cleanedText), "FEYNMAN");
+  assert.equal(reveal.questions.length, 3);
+  assert.ok(reveal.questions.every((question) => question.type === "REVEAL_ANSWER"));
+  assert.ok(findQuestion(reveal.questions, "Gewurztraminer"));
+  assert.ok(reveal.questions.some((question) => question.prompt === "São João"));
+});
+
+test("parseia lista de perguntas com gabarito ao final como revelar resposta", () => {
+  const cleanedText = cleanExtractedText(`
+  1. O que e ruptura?
+  2. O que e inventario?
+  3. Como e calculada a cobertura de estoque?
+
+  Gabarito:
+  1. Falta de produto no momento da compra pelo consumidor.
+  2. Contagem fisica confrontada com estoque logico.
+  3. Estoque do produto dividido pela saida media.
+  `);
+
+  assert.equal(detectStructuredQuestionnaire(cleanedText), true);
+
+  const review = generateQuizFromDocument(buildDocument(cleanedText), "FEYNMAN", "DISCURSIVE_ONLY");
+  assert.equal(review.questions.length, 3);
+  assert.ok(review.questions.every((question) => question.type === "REVEAL_ANSWER"));
+  assert.ok(review.questions.some((question) => question.prompt === "O que e ruptura?"));
+});
+
+test("sorteia perguntas da totalidade do questionario em vez de repetir sempre o inicio", () => {
   const cleanedText = cleanExtractedText(`
   BLOCO 1 - BASE
   1. O que e o item um?
-  Resposta:
-  Resposta do item um.
+  Resposta: Resposta do item um.
   2. O que e o item dois?
-  Resposta:
-  Resposta do item dois.
+  Resposta: Resposta do item dois.
   3. O que e o item tres?
-  Resposta:
-  Resposta do item tres.
+  Resposta: Resposta do item tres.
   4. O que e o item quatro?
-  Resposta:
-  Resposta do item quatro.
+  Resposta: Resposta do item quatro.
 
   BLOCO 2 - AVANCADO
   5. O que e o item cinco?
-  Resposta:
-  Resposta do item cinco.
+  Resposta: Resposta do item cinco.
   6. O que e o item seis?
-  Resposta:
-  Resposta do item seis.
+  Resposta: Resposta do item seis.
   7. O que e o item sete?
-  Resposta:
-  Resposta do item sete.
+  Resposta: Resposta do item sete.
   8. O que e o item oito?
-  Resposta:
-  Resposta do item oito.
+  Resposta: Resposta do item oito.
 
   BLOCO 3 - EXTRA
   9. O que e o item nove?
-  Resposta:
-  Resposta do item nove.
+  Resposta: Resposta do item nove.
   10. O que e o item dez?
-  Resposta:
-  Resposta do item dez.
+  Resposta: Resposta do item dez.
   11. O que e o item onze?
-  Resposta:
-  Resposta do item onze.
+  Resposta: Resposta do item onze.
   12. O que e o item doze?
-  Resposta:
-  Resposta do item doze.
+  Resposta: Resposta do item doze.
   `);
 
   const firstRun = withMockedRandom(
-    [0.01, 0.15, 0.22, 0.35, 0.48, 0.52, 0.61, 0.73, 0.84, 0.93, 0.04, 0.17, 0.29, 0.41, 0.56, 0.68, 0.79, 0.88],
+    [0.01, 0.15, 0.22, 0.35, 0.48, 0.52, 0.61, 0.73, 0.84, 0.93, 0.04, 0.17],
     () => generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW"),
   );
   const secondRun = withMockedRandom(
-    [0.91, 0.82, 0.74, 0.66, 0.58, 0.49, 0.37, 0.25, 0.13, 0.02, 0.95, 0.86, 0.77, 0.69, 0.57, 0.44, 0.31, 0.18],
+    [0.91, 0.82, 0.74, 0.66, 0.58, 0.49, 0.37, 0.25, 0.13, 0.02, 0.95, 0.86],
     () => generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW"),
   );
 
@@ -414,7 +355,7 @@ test("sorteia perguntas do banco inteiro em vez de repetir sempre o inicio do qu
   assert.ok(secondRunPrompts.some((prompt) => prompt.includes("item dez") || prompt.includes("item onze") || prompt.includes("item doze")));
 });
 
-test("nao gera mais perguntas a partir de material bruto", () => {
+test("nao gera perguntas a partir de material bruto", () => {
   const cleanedText = cleanExtractedText(`
   Gestao de estoques organiza a reposicao e o acompanhamento dos produtos para reduzir ruptura e excesso.
   Saida media e o parametro que o sistema grava a partir do historico de vendas de cada produto.
@@ -428,4 +369,23 @@ test("nao gera mais perguntas a partir de material bruto", () => {
   assert.equal(generateQuizFromDocument(buildDocument(cleanedText), "QUICK_REVIEW").questions.length, 0);
   assert.equal(generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE").questions.length, 0);
   assert.equal(generateQuizFromDocument(buildDocument(cleanedText), "FLASHCARDS").questions.length, 0);
+});
+
+test("descarta conversao para multipla escolha quando nao ha distratores plausiveis", () => {
+  const cleanedText = cleanExtractedText(`
+  [Inventario]
+  P: O que e inventario rotativo?
+  R: E a contagem periodica de parte dos itens para comparar estoque fisico e estoque logico.
+
+  [Camaras frias]
+  P: Como os produtos resfriados devem seguir para as camaras?
+  R: Devem seguir diretamente para dentro das camaras, respeitando a cadeia de frio.
+
+  [Etiquetas]
+  P: O que as etiquetas devem permitir?
+  R: Devem permitir rapida identificacao das informacoes registradas nas etiquetas.
+  `);
+
+  const multipleChoice = generateQuizFromDocument(buildDocument(cleanedText), "DEEP_DIVE", "MULTIPLE_CHOICE_ONLY");
+  assert.equal(findQuestion(multipleChoice.questions, "o que e inventario rotativo"), undefined);
 });

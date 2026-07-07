@@ -37,18 +37,20 @@ export function serializeDocument(document: PrismaDocument): Document {
 
 export function serializeQuestion(question: PrismaQuestion): Question {
   const config = parseQuestionConfig(question.choicesJson);
+  const questionType = config.presentationType ?? question.type;
   const baseQuestion = {
     id: question.id,
     sessionId: question.sessionId,
-    type: question.type,
+    type: questionType,
     position: question.position,
     prompt: question.prompt,
     topic: question.topic,
     choices: config.choices,
+    matchingPairs: config.matchingPairs,
     responseFormat: config.responseFormat,
   };
 
-  if (question.type === "SHORT_ANSWER") {
+  if (questionType === "SHORT_ANSWER" || questionType === "REVEAL_ANSWER") {
     return {
       ...baseQuestion,
       expectedAnswer: question.correctAnswer ?? undefined,
@@ -57,7 +59,7 @@ export function serializeQuestion(question: PrismaQuestion): Question {
     };
   }
 
-  if (question.type === "FLASHCARD") {
+  if (questionType === "FLASHCARD") {
     return {
       ...baseQuestion,
       expectedAnswer: question.correctAnswer ?? undefined,
@@ -73,11 +75,12 @@ export function serializeQuestionForEvaluation(question: PrismaQuestion): Questi
   return {
     id: question.id,
     sessionId: question.sessionId,
-    type: question.type,
+    type: config.presentationType ?? question.type,
     position: question.position,
     prompt: question.prompt,
     topic: question.topic,
     choices: config.choices,
+    matchingPairs: config.matchingPairs,
     responseFormat: config.responseFormat,
     correctAnswer: question.correctAnswer ?? undefined,
     explanation: question.explanation ?? undefined,
