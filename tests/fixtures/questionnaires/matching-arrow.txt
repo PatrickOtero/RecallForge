@@ -1,0 +1,5 @@
+[ASSOCIACAO]
+Instrução: Associe cada faixa de reposição à regra correspondente.
+1. 30% => Resultado maior que 11 dias de cobertura.
+2. 50% => Resultado maior que 5 e menor que 11 dias de cobertura.
+3. 95% => Resultado menor que 5 dias de cobertura.

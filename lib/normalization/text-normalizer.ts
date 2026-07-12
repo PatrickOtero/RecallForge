@@ -29,7 +29,7 @@ function normalizeDashes(value: string) {
 function normalizeBullets(value: string) {
   return value
     .replace(/^[>\u2022\u25ba\u25cf\u25e6\u27a2\u00bb\u00b7\u2023\u2043\uf0d8\u00d8]+\s*/gmu, "")
-    .replace(/[>\u2022\u25ba\u25cf\u25e6\u27a2\u00bb\u00b7\u2023\u2043\uf0d8]/gmu, " ");
+    .replace(/[\u2022\u25ba\u25cf\u25e6\u27a2\u00bb\u00b7\u2023\u2043\uf0d8]/gmu, " ");
 }
 
 function countMojibakeArtifacts(value: string) {

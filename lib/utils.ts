@@ -148,6 +148,7 @@ export function parseQuestionConfig(
 
   const allowedQuestionTypes: QuestionType[] = [
     "MULTIPLE_CHOICE",
+    "MULTI_SELECT",
     "TRUE_FALSE",
     "FILL_BLANK",
     "SHORT_ANSWER",
@@ -193,6 +194,8 @@ export function getQuestionTypeLabel(type: QuestionType) {
   switch (type) {
     case "MULTIPLE_CHOICE":
       return "Múltipla escolha";
+    case "MULTI_SELECT":
+      return "Múltipla seleção";
     case "TRUE_FALSE":
       return "Verdadeiro/Falso";
     case "FILL_BLANK":

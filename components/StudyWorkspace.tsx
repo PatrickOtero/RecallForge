@@ -3,25 +3,32 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
+import { ImportReviewPage } from "@/components/import-review/ImportReviewPage";
 import { QuizModeSelector } from "@/components/QuizModeSelector";
 import { QuizResultSummary } from "@/components/QuizResultSummary";
 import { QuizRunner } from "@/components/QuizRunner";
 import { UploadStudyMaterial } from "@/components/UploadStudyMaterial";
 import type {
+  ConfirmImportResponse,
   CreateQuizSessionResponse,
   Document,
   IngestDocumentResponse,
+  ImportCandidate,
+  ImportReport,
   QuizComposition,
   QuizModeOption,
   QuizResultSummary as QuizSummary,
   QuizSession,
 } from "@/lib/types";
+import { convertImportCandidatesToQuestionDrafts } from "@/lib/questionnaire-import";
 import { studyWorkspaceStyles as styles } from "./StudyWorkspace.styles";
 
 export function StudyWorkspace() {
   const router = useRouter();
-  const [step, setStep] = useState<"input" | "modes" | "quiz" | "result">("input");
+  const [step, setStep] = useState<"input" | "review" | "modes" | "quiz" | "result">("input");
   const [document, setDocument] = useState<Document | null>(null);
+  const [confirmedCandidates, setConfirmedCandidates] = useState<ImportCandidate[]>([]);
+  const [report, setReport] = useState<ImportReport | null>(null);
   const [options, setOptions] = useState<QuizModeOption[]>([]);
   const [session, setSession] = useState<QuizSession | null>(null);
   const [summary, setSummary] = useState<QuizSummary | null>(null);
@@ -29,13 +36,31 @@ export function StudyWorkspace() {
   const [isModePending, startModeTransition] = useTransition();
   const [isAnalysisPending, startAnalysisTransition] = useTransition();
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const importedQuestions = convertImportCandidatesToQuestionDrafts(confirmedCandidates);
+  const importedBreakdown = [...new Map(
+    importedQuestions.map((question) => [
+      question.type,
+      importedQuestions.filter((item) => item.type === question.type).length,
+    ]),
+  )].map(([type, count]) => ({ type, count }));
 
   function handleAnalyzeSuccess(payload: IngestDocumentResponse) {
     startAnalysisTransition(() => {
       setDocument(payload.document);
-      setOptions(payload.options);
+      setReport(payload.report);
+      setOptions([]);
+      setConfirmedCandidates([]);
       setSummary(null);
       setSession(null);
+      setFlowError(null);
+      setStep("review");
+    });
+  }
+
+  function handleImportConfirmed(payload: ConfirmImportResponse) {
+    startAnalysisTransition(() => {
+      setOptions(payload.options);
+      setConfirmedCandidates(payload.candidates);
       setFlowError(null);
       setStep("modes");
     });
@@ -56,6 +81,7 @@ export function StudyWorkspace() {
       },
       body: JSON.stringify({
         documentId: document.id,
+        importCandidates: confirmedCandidates,
         mode,
         composition,
       }),
@@ -96,7 +122,9 @@ export function StudyWorkspace() {
 
   function resetFlow() {
     setDocument(null);
+    setReport(null);
     setOptions([]);
+    setConfirmedCandidates([]);
     setSession(null);
     setSummary(null);
     setFlowError(null);
@@ -118,11 +146,22 @@ export function StudyWorkspace() {
           <UploadStudyMaterial isPending={isAnalysisPending} onSuccess={handleAnalyzeSuccess} />
         ) : null}
 
+        {step === "review" && document && report ? (
+          <ImportReviewPage
+            documentId={document.id}
+            documentTitle={document.title}
+            report={report}
+            onBack={resetFlow}
+            onConfirmed={handleImportConfirmed}
+          />
+        ) : null}
+
         {step === "modes" && document ? (
           <div className={styles.modeStep}>
             {flowError ? <div className={styles.error}>{flowError}</div> : null}
             <QuizModeSelector
               document={document}
+              importedBreakdown={importedBreakdown}
               options={options}
               isPending={isModePending || isCreatingSession}
               onBack={resetFlow}

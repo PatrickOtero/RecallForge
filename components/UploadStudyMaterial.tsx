@@ -75,7 +75,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
     <form onSubmit={handleSubmit} className={styles.form}>
       <div className={styles.intro}>
         <h2 className={styles.title}>Envie um questionário pronto</h2>
-        <p className={styles.description}>Cole perguntas e respostas ou envie um arquivo estruturado para estudar.</p>
+        <p className={styles.description}>Cole perguntas e respostas ou envie um arquivo variado. Vamos detectar o formato e mostrar uma prévia antes de estudar.</p>
       </div>
 
       <div className={styles.modeButtons}>
@@ -111,7 +111,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
           <p className={styles.formatsText}>
             Texto colado ou upload de <span className={styles.formatName}>.txt</span>,{" "}
             <span className={styles.formatName}>.pdf</span> e{" "}
-            <span className={styles.formatName}>.docx</span>, desde que o conteúdo já esteja em formato de perguntas e respostas.
+            <span className={styles.formatName}>.docx</span>, inclusive quando o questionário veio de páginas, listas, tabelas ou bancos de questões.
           </p>
         </div>
       </div>
@@ -167,7 +167,7 @@ export function UploadStudyMaterial({ isPending, onSuccess }: UploadStudyMateria
 
       <div className={styles.footer}>
         <div className={styles.footerNote}>
-          Vamos validar se o conteúdo está em formato de perguntas e respostas antes de iniciar.
+          Vamos montar uma prévia editável do que foi entendido antes de liberar os modos de estudo.
         </div>
         <button type="submit" disabled={pending} className={styles.submitButton}>
           {pending ? "Validando questionário..." : "Continuar"}

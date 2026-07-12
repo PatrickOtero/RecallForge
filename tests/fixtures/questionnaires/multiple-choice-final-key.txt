@@ -1,0 +1,15 @@
+1. Qual sistemática gera pedidos automaticamente?
+A) Sistemática 1
+B) Sistemática 10
+C) Sistemática 11
+D) Sistemática 20
+
+2. Qual relatório acompanha o dia a dia?
+A) Perdas
+B) Dia a dia
+C) Curva ABC
+D) Câmaras frias
+
+Gabarito:
+1-A
+2-B

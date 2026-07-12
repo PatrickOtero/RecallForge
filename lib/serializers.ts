@@ -38,6 +38,7 @@ export function serializeDocument(document: PrismaDocument): Document {
 export function serializeQuestion(question: PrismaQuestion): Question {
   const config = parseQuestionConfig(question.choicesJson);
   const questionType = config.presentationType ?? question.type;
+  const publicChoices = config.choices.map(({ id, label }) => ({ id, label }));
   const baseQuestion = {
     id: question.id,
     sessionId: question.sessionId,
@@ -45,7 +46,7 @@ export function serializeQuestion(question: PrismaQuestion): Question {
     position: question.position,
     prompt: question.prompt,
     topic: question.topic,
-    choices: config.choices,
+    choices: publicChoices,
     matchingPairs: config.matchingPairs,
     responseFormat: config.responseFormat,
   };

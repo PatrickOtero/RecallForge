@@ -276,6 +276,39 @@ test("parseia associacao explicita com pares em seta", () => {
   assert.deepEqual(drafts[0]?.matchingPairs?.map((pair) => pair.left), ["Provence", "Roussillon"]);
 });
 
+test("preserva a seta => durante a limpeza do texto importado", () => {
+  const cleanedText = cleanExtractedText(`
+  [ASSOCIACAO]
+  1. Provence => Lider francesa e mundial em roses secos e frutados.
+  `);
+
+  assert.match(cleanedText, /=>/);
+});
+
+test("preserva a instrucao real do bloco e nao divide pares numerados em perguntas separadas", () => {
+  const drafts = parseMatchingQuestionDrafts(`
+  [QUESTÕES DE ASSOCIAÇÃO]
+  Instrução: Associe cada faixa de reposição à regra correspondente.
+  1. 30% de reposição => Resultado maior que 11 dias de cobertura.
+  2. 50% de reposição => Resultado maior que 5 e menor que 11 dias de cobertura.
+  3. 95% de reposição => Resultado menor que 5 dias de cobertura.
+
+  [FLASHCARD]
+  Frente: Ruptura
+  Verso: Falta de produto.
+  `);
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.type, "MATCHING");
+  assert.equal(drafts[0]?.prompt, "Associe cada faixa de reposição à regra correspondente.");
+  assert.equal(drafts[0]?.matchingPairs?.length, 3);
+  assert.deepEqual(drafts[0]?.matchingPairs?.map((pair) => pair.left), [
+    "30% de reposição",
+    "50% de reposição",
+    "95% de reposição",
+  ]);
+});
+
 test("parseia associacao explicita com pares em hifen", () => {
   const drafts = parseMatchingQuestionDrafts(`
   [ASSOCIAÇÃO]
@@ -341,6 +374,73 @@ test("capabilities habilitam e bloqueiam modos por tipo disponivel", () => {
   assert.equal(modes.find((mode) => mode.mode === "FLASHCARDS")?.available, true);
   assert.equal(modes.find((mode) => mode.mode === "EXAM")?.available, false);
   assert.equal(modes.find((mode) => mode.mode === "DEEP_DIVE")?.available, false);
+});
+
+test("detecta 10 blocos explicitos de associacao e habilita o modo Associacao", () => {
+  const cleanedText = cleanExtractedText(`
+  [ASSOCIACAO]
+  Instrucao: Associe cada sistematica a sua definicao correta.
+  1. Sistematica 1 => Pedidos gerados automaticamente pelo sistema.
+  2. Sistematica 10 => Pedidos gerados pela loja.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada sigla da formula ao significado correto.
+  1. SM => Saida media.
+  2. EPF => Estoque padrao final.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada conceito ao calculo correspondente.
+  1. Cobertura => Estoque atual dividido pela saida media.
+  2. Oferta => Volume adicional planejado.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada faixa de reposicao a regra correspondente.
+  1. 30% => Resultado maior que 11 dias de cobertura.
+  2. 50% => Resultado maior que 5 e menor que 11 dias de cobertura.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada etapa do inventario a sua finalidade.
+  1. Contagem => Registrar o estoque fisico.
+  2. Conciliacao => Comparar fisico e logico.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada tipo de perda a definicao correta.
+  1. Perda identificada => Possui causa conhecida.
+  2. Perda nao identificada => Nao possui causa definida.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada temperatura ao armazenamento correto.
+  1. Resfriado => Entre 0 e 10 graus.
+  2. Congelado => Abaixo de 0 grau.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada relatorio ao uso principal.
+  1. Dia a dia => Acompanhar ruptura e excesso.
+  2. Nao atendidos => Identificar faltas ao cliente.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada agenda a sua periodicidade.
+  1. Agenda diaria => Acompanhamento operacional.
+  2. Agenda semanal => Revisoes taticas da area.
+
+  [ASSOCIACAO]
+  Instrucao: Associe cada rotina a sua acao principal.
+  1. Recebimento => Conferir a carga recebida.
+  2. Armazenamento => Enderecar produtos corretamente.
+  `);
+
+  const document = buildDocument(cleanedText);
+  const matchingDrafts = parseMatchingQuestionDrafts(cleanedText);
+  const capabilities = computeStudyBankCapabilities(matchingDrafts);
+  const options = generateQuizOptions(document);
+  const flashcardsOption = options.find((option) => option.mode === "FLASHCARDS");
+  const flashcardsQuiz = generateQuizFromDocument(document, "FLASHCARDS", "AUTO");
+
+  assert.equal(matchingDrafts.length, 10);
+  assert.equal(capabilities.matching, 10);
+  assert.equal(flashcardsOption?.available, true);
+  assert.ok(flashcardsQuiz.questions.length > 0);
+  assert.ok(flashcardsQuiz.questions.every((question) => question.type === "MATCHING"));
 });
 
 test("parseia frente/verso e termo/definicao como itens revelaveis quando ha volume minimo", () => {

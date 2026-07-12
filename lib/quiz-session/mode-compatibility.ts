@@ -5,9 +5,9 @@ import { getStudyModeConfig, studyModeConfigs } from "@/lib/quiz-session/mode-co
 export function isQuestionCompatibleWithMode(question: QuestionDraft, mode: QuizMode) {
   switch (mode) {
     case "QUICK_REVIEW":
-      return ["MULTIPLE_CHOICE", "TRUE_FALSE", "MATCHING", "FLASHCARD", "REVEAL_ANSWER"].includes(question.type);
+      return ["MULTIPLE_CHOICE", "MULTI_SELECT", "TRUE_FALSE", "MATCHING", "FLASHCARD", "REVEAL_ANSWER"].includes(question.type);
     case "DEEP_DIVE":
-      return question.type === "MULTIPLE_CHOICE";
+      return question.type === "MULTIPLE_CHOICE" || question.type === "MULTI_SELECT";
     case "EXAM":
       return question.type === "TRUE_FALSE";
     case "FLASHCARDS":

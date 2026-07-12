@@ -1,12 +1,14 @@
 import { prisma } from "@/lib/prisma";
+import { convertImportCandidatesToQuestionDrafts } from "@/lib/questionnaire-import";
 import {
   detectStructuredQuestionnaire,
   generateQuizFromDocument,
   getMinimumQuestionTarget,
   getUnavailableModeMessage,
 } from "@/lib/quiz/mock-quiz-generator";
+import { buildQuizFromQuestionDrafts, getQuestionTargetForMode } from "@/lib/quiz-session/from-question-drafts";
 import { serializeDocument, serializeQuizSession } from "@/lib/serializers";
-import type { QuestionType } from "@/lib/types";
+import type { ImportCandidate, QuestionType } from "@/lib/types";
 import { serializeQuestionConfig } from "@/lib/utils";
 import { isQuizComposition, isQuizMode, resolveQuizComposition } from "@/lib/validation";
 
@@ -19,7 +21,7 @@ function toStoredQuestionType(type: QuestionType): StoredQuestionType {
     return "FLASHCARD";
   }
 
-  if (type === "MATCHING") {
+  if (type === "MATCHING" || type === "MULTI_SELECT") {
     return "MULTIPLE_CHOICE";
   }
 
@@ -39,6 +41,7 @@ function invalidQuestionnaireResponse() {
 export async function POST(request: Request) {
   const body = (await request.json()) as {
     documentId?: string;
+    importCandidates?: ImportCandidate[];
     mode?: string;
     composition?: string;
   };
@@ -52,6 +55,7 @@ export async function POST(request: Request) {
   }
 
   const requestedComposition = body.composition && isQuizComposition(body.composition) ? body.composition : undefined;
+  const composition = resolveQuizComposition(body.mode, requestedComposition);
 
   const existingDocument = await prisma.document.findUnique({
     where: { id: body.documentId },
@@ -63,12 +67,23 @@ export async function POST(request: Request) {
 
   const document = serializeDocument(existingDocument);
 
-  if (!detectStructuredQuestionnaire(document.cleanedText)) {
+  const generated = Array.isArray(body.importCandidates) && body.importCandidates.length > 0
+    ? (() => {
+        const drafts = convertImportCandidatesToQuestionDrafts(body.importCandidates);
+        return buildQuizFromQuestionDrafts(document.title, drafts, body.mode, composition);
+      })()
+    : (() => {
+        if (!detectStructuredQuestionnaire(document.cleanedText)) {
+          return null;
+        }
+
+        return generateQuizFromDocument(document, body.mode, composition);
+      })();
+
+  if (!generated) {
     return invalidQuestionnaireResponse();
   }
 
-  const composition = resolveQuizComposition(body.mode, requestedComposition);
-  const generated = generateQuizFromDocument(document, body.mode, composition);
   if (generated.questions.length === 0) {
     return Response.json(
       {
@@ -78,12 +93,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const targetCount = getMinimumQuestionTarget(body.mode);
+  const targetCount = Array.isArray(body.importCandidates) && body.importCandidates.length > 0
+    ? getQuestionTargetForMode(body.mode)
+    : getMinimumQuestionTarget(body.mode);
   const generationNote =
     generated.questions.length < targetCount
       ? `Este questionário oferece ${generated.questions.length} ${
           generated.questions.length === 1 ? "pergunta útil" : "perguntas úteis"
-        } neste modo. Mantivemos apenas o que tinha pares confiáveis no arquivo.`
+        } neste modo. Mantivemos apenas o que ficou confiável após a revisão da importação.`
       : undefined;
 
   const session = await prisma.quizSession.create({
@@ -102,7 +119,9 @@ export async function POST(request: Request) {
             choices: question.choices,
             matchingPairs: question.matchingPairs,
             presentationType:
-              question.type === "MATCHING" || question.type === "REVEAL_ANSWER" ? question.type : undefined,
+              question.type === "MATCHING" || question.type === "REVEAL_ANSWER" || question.type === "MULTI_SELECT"
+                ? question.type
+                : undefined,
             responseFormat: question.responseFormat,
           }),
           correctAnswer: question.correctAnswer ?? null,

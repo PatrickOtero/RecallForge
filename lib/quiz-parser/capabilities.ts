@@ -6,7 +6,7 @@ export function computeStudyBankCapabilities(questions: QuestionDraft[]): StudyB
     (capabilities, question) => {
       capabilities.total += 1;
 
-      if (question.type === "MULTIPLE_CHOICE") {
+      if (question.type === "MULTIPLE_CHOICE" || question.type === "MULTI_SELECT") {
         capabilities.multipleChoice += 1;
       }
 

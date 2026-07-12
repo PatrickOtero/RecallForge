@@ -1,23 +1,27 @@
 import type { MatchingPair, QuestionDraft } from "@/lib/types";
 import { normalizeForComparison } from "@/lib/utils";
-import { stripListMarker, stripQuestionnaireLabel } from "@/lib/quiz-parser/utils/labels";
+import { stripQuestionnaireLabel } from "@/lib/quiz-parser/utils/labels";
 import { buildStableId, cleanParserLine, ensureSentence, trimOuterPunctuation } from "@/lib/quiz-parser/utils/text";
 
 const defaultPrompt = "Associe cada item à descrição correta.";
+const matchingHeaderAliases = new Set([
+  "ASSOCIACAO",
+  "ASSOCIACAO DE ITENS",
+  "MATCHING",
+  "QUESTOES DE ASSOCIACAO",
+]);
+const matchingPairMatcher = /^\s*(?:(?:\d+|[A-Z])[\.\)]\s*)?(.+?)\s*(?:=>|->|→|⇨|—|–|\s-\s)\s*(.+?)\s*$/u;
 
-function isMatchingHeader(line: string) {
-  const normalized = normalizeForComparison(line.replace(/^\[|\]$/g, ""));
-
-  return /^\[.+\]$/.test(line) && (
-    normalized === "associacao" ||
-    normalized === "matching" ||
-    normalized === "associacao de itens" ||
-    normalized === "questoes de associacao"
-  );
+function normalizeMatchingToken(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toUpperCase()
+    .trim();
 }
 
-function isMatchingInstruction(line: string) {
-  const normalized = normalizeForComparison(line);
+function looksLikeMatchingPrompt(value: string) {
+  const normalized = normalizeForComparison(stripQuestionnaireLabel(value));
 
   return (
     /^associe:?$/.test(normalized) ||
@@ -28,17 +32,20 @@ function isMatchingInstruction(line: string) {
   );
 }
 
-function isAnyBracketHeader(line: string) {
-  return /^\[[^\]]+\]$/.test(line);
+function isMatchingHeader(line: string) {
+  if (!/^\[.+\]$/.test(line)) {
+    return false;
+  }
+
+  return matchingHeaderAliases.has(normalizeMatchingToken(line.replace(/^\[|\]$/g, "")));
 }
 
-function isHardSectionBoundary(line: string) {
-  const normalized = normalizeForComparison(line);
+function isMatchingInstruction(line: string) {
+  return looksLikeMatchingPrompt(line);
+}
 
-  return (
-    (isAnyBracketHeader(line) && !isMatchingHeader(line)) ||
-    /^(?:bloco|modulo|modulo|tema|capitulo|secao|aula)\s+\d+/i.test(normalized)
-  );
+function isAnyBracketHeader(line: string) {
+  return /^\[[^\]]+\]$/.test(line);
 }
 
 function isColumnLabel(line: string) {
@@ -69,14 +76,33 @@ function buildPairs(rawPairs: Array<{ left: string; right: string }>): MatchingP
   return pairs;
 }
 
-function buildDraft(pairs: MatchingPair[], topic = "Associação"): QuestionDraft | null {
+function extractPrompt(lines: string[]) {
+  for (const line of lines) {
+    if (!line || isMatchingHeader(line) || isColumnLabel(line)) {
+      continue;
+    }
+
+    const stripped = stripQuestionnaireLabel(line);
+    if (!stripped) {
+      continue;
+    }
+
+    if (looksLikeMatchingPrompt(line) || /^instruc(?:ao|oes?)\b/.test(normalizeForComparison(line))) {
+      return ensureSentence(stripped);
+    }
+  }
+
+  return defaultPrompt;
+}
+
+function buildDraft(pairs: MatchingPair[], prompt: string, topic = "Associação"): QuestionDraft | null {
   if (pairs.length < 2) {
     return null;
   }
 
   return {
     type: "MATCHING",
-    prompt: defaultPrompt,
+    prompt,
     topic,
     matchingPairs: pairs,
     explanation: pairs.map((pair) => `${pair.left}: ${pair.right}`).join(" "),
@@ -91,15 +117,14 @@ function parseInlinePairs(lines: string[]) {
       continue;
     }
 
-    const cleaned = stripListMarker(line);
-    const match = cleaned.match(/^(.{2,120}?)\s*(?:=>|->|—|–|\s-\s)\s*(.{2,500})$/u);
+    const match = line.match(matchingPairMatcher);
     if (!match) {
       continue;
     }
 
     rawPairs.push({
-      left: stripQuestionnaireLabel(match[1]),
-      right: stripQuestionnaireLabel(match[2]),
+      left: stripQuestionnaireLabel(match[1] ?? ""),
+      right: stripQuestionnaireLabel(match[2] ?? ""),
     });
   }
 
@@ -115,7 +140,7 @@ function parseItemAnswerPairs(lines: string[]) {
       continue;
     }
 
-    const left = stripListMarker(line);
+    const left = stripQuestionnaireLabel(line.replace(/^\s*\d+[\).]\s*/, ""));
     const next = lines[index + 1] ?? "";
     const following = lines[index + 2] ?? "";
     const inlineAnswer = next.match(/^(?:resposta|gabarito|answer)\s*[:.-]\s*(.*)$/iu);
@@ -197,43 +222,57 @@ function parseColumnPairs(lines: string[]) {
 function extractMatchingBlocks(text: string) {
   const lines = text.split(/\r?\n/).map(cleanParserLine);
   const blocks: string[][] = [];
+  let currentBlock: string[] | null = null;
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!isMatchingHeader(line) && !isMatchingInstruction(line)) {
+  for (const line of lines) {
+    if (isMatchingHeader(line)) {
+      if (currentBlock && currentBlock.length > 0) {
+        blocks.push(currentBlock);
+      }
+
+      currentBlock = [line];
       continue;
     }
 
-    const block: string[] = [line];
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const current = lines[cursor];
-
-      if (current && cursor > index + 1 && isHardSectionBoundary(current)) {
-        break;
-      }
-
-      block.push(current);
+    if (!currentBlock) {
+      continue;
     }
 
-    blocks.push(block);
+    if (line && isAnyBracketHeader(line)) {
+      blocks.push(currentBlock);
+      currentBlock = null;
+      continue;
+    }
+
+    currentBlock.push(line);
+  }
+
+  if (currentBlock && currentBlock.length > 0) {
+    blocks.push(currentBlock);
   }
 
   return blocks;
 }
 
 export function parseMatchingQuestionDrafts(text: string): QuestionDraft[] {
-  return extractMatchingBlocks(text).flatMap((block) => {
+  const matchingQuestions = extractMatchingBlocks(text).flatMap((block) => {
+    const prompt = extractPrompt(block);
     const drafts = [
-      buildDraft(parseColumnPairs(block)),
-      buildDraft(parseInlinePairs(block)),
-      buildDraft(parseItemAnswerPairs(block)),
+      buildDraft(parseColumnPairs(block), prompt),
+      buildDraft(parseInlinePairs(block), prompt),
+      buildDraft(parseItemAnswerPairs(block), prompt),
     ].filter((draft): draft is QuestionDraft => Boolean(draft));
 
     return drafts.slice(0, 1);
   });
+
+  console.info("[quiz-parser] matching blocks found:", matchingQuestions.length);
+
+  return matchingQuestions;
 }
 
 export const matchingParserInternals = {
   isMatchingHeader,
   isMatchingInstruction,
+  normalizeMatchingToken,
 };

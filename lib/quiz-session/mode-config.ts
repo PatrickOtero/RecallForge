@@ -25,9 +25,9 @@ export const studyModeConfigs: StudyModeConfig[] = [
     mode: "DEEP_DIVE",
     title: "Múltipla escolha",
     tagline: "Alternativas objetivas",
-    description: "Usa questões com alternativas prontas ou perguntas convertíveis com distratores plausíveis.",
+    description: "Usa questões objetivas com uma ou múltiplas alternativas corretas.",
     composition: "MULTIPLE_CHOICE_ONLY",
-    fallbackQuestionTypes: ["MULTIPLE_CHOICE"],
+    fallbackQuestionTypes: ["MULTIPLE_CHOICE", "MULTI_SELECT"],
     unavailableMessage: "Não há questões suficientes para múltipla escolha.",
   },
   {

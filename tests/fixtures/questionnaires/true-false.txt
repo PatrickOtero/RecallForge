@@ -1,0 +1,3 @@
+Verdadeiro ou falso:
+O inventário confronta estoque físico com estoque lógico.
+Resposta: Verdadeiro

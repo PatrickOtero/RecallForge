@@ -59,6 +59,30 @@ function evaluateMatching(question: QuestionForEvaluation, responseText: string)
   };
 }
 
+function evaluateMultiSelect(question: QuestionForEvaluation, responseText: string) {
+  const selectedIds = new Set(safeJsonParse<string[]>(responseText, []));
+  const correctIds = new Set(
+    (question.choices ?? [])
+      .filter((choice) => choice.isCorrect)
+      .map((choice) => choice.id),
+  );
+  const matchesExactly =
+    selectedIds.size === correctIds.size &&
+    [...selectedIds].every((value) => correctIds.has(value));
+  const overlap = [...selectedIds].filter((value) => correctIds.has(value)).length;
+  const score = correctIds.size === 0 ? 0 : matchesExactly ? 1 : overlap / correctIds.size;
+
+  return {
+    responseText,
+    selfAssessment: null,
+    isCorrect: matchesExactly,
+    score,
+    feedback: matchesExactly
+      ? "Todas as alternativas corretas foram selecionadas."
+      : "Confira as alternativas corretas destacadas e tente novamente em uma nova rodada.",
+  };
+}
+
 export function evaluateAnswer(
   question: QuestionForEvaluation,
   responseText?: string,
@@ -72,6 +96,10 @@ export function evaluateAnswer(
 
   if (question.type === "MATCHING") {
     return evaluateMatching(question, safeResponse);
+  }
+
+  if (question.type === "MULTI_SELECT") {
+    return evaluateMultiSelect(question, safeResponse);
   }
 
   const isCorrect = compareObjectiveAnswer(question.correctAnswer ?? "", safeResponse);

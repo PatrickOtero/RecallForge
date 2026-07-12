@@ -1,0 +1,15 @@
+2 | Projeto Medicina - www.projetomedicina.com.br
+
+5) (UNICAMP-2009) A ilustracao abaixo representa a constelacao de satelites do Sistema de Posicionamento Global (GPS).
+a) Qual a finalidade do GPS? Como esses satelites em orbita transmitem os dados para os aparelhos receptores localizados na superficie terrestre?
+b) O que sao latitude e longitude?
+
+6) (FUVEST-2010) A personagem Mafalda olha o globo e afirma que esta de cabeca para baixo.
+a) Porque ela faz essa afirmacao?
+b) Qual constelacao e referencia do polo astronomico Sul?
+
+GABARITO
+5) a) O Sistema de Posicionamento Global funciona por meio de satelites que emitem sinais para triangulacao da posicao do receptor.
+b) Latitude e a distancia angular ao Equador; longitude e o angulo medido a partir de Greenwich.
+6) a) Ela usa um globo em que o Norte esta para cima e imagina que o Sul estaria invertido.
+b) O Cruzeiro do Sul.

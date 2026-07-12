@@ -1,12 +1,13 @@
 "use client";
 
-import type { Document, QuizMode, QuizModeOption } from "@/lib/types";
-import { formatCharacterCount, getDocumentSourceLabel } from "@/lib/utils";
+import type { Document, QuestionType, QuizMode, QuizModeOption } from "@/lib/types";
+import { formatCharacterCount, getDocumentSourceLabel, getQuestionTypeLabel } from "@/lib/utils";
 import { StudyModeGrid } from "@/components/study-mode/StudyModeGrid";
 import { quizModeSelectorStyles as styles } from "./QuizModeSelector.styles";
 
 interface QuizModeSelectorProps {
   document: Document;
+  importedBreakdown?: Array<{ count: number; type: QuestionType }>;
   options: QuizModeOption[];
   isPending: boolean;
   onBack: () => void;
@@ -15,6 +16,7 @@ interface QuizModeSelectorProps {
 
 export function QuizModeSelector({
   document,
+  importedBreakdown = [],
   options,
   isPending,
   onBack,
@@ -48,6 +50,16 @@ export function QuizModeSelector({
             </div>
           </div>
         </div>
+
+        {importedBreakdown.length > 0 ? (
+          <div className={styles.importBreakdown}>
+            {importedBreakdown.map((item) => (
+              <span key={`${item.type}-${item.count}`} className={styles.importChip}>
+                {item.count}x {getQuestionTypeLabel(item.type)}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <StudyModeGrid isPending={isPending} options={options} onStart={onSelect} />

@@ -1,0 +1,19 @@
+1 | Projeto Medicina - www.projetomedicina.com.br
+
+8) (UEPG-2000) Com relacao aos astros que compoem o Sistema Solar, assinale o que for correto.
+01) Os planetas do Sistema Solar se agrupam em duas classes.
+02) A lei das orbitas foi deduzida por Johannes Kepler.
+04) O periodo de Saros descreve a recorrencia dos eclipses.
+08) Marte nao possui satelites e gira em sentido retrogrado.
+16) A cromosfera constitui o limite do disco solar visivel em luz branca.
+
+9) (Mack-2004) Na camada da atmosfera que nos envolve, essa camada e denominada:
+a) mesosfera.
+b) estratosfera.
+c) troposfera.
+d) ionosfera.
+e) termosfera.
+
+GABARITO
+8) F-V-V-F-V
+9) Alternativa: C

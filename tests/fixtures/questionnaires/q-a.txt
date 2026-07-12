@@ -1,0 +1,2 @@
+Q: O que é saída média?
+A: Média histórica de vendas usada pelo sistema.

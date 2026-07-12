@@ -1,0 +1,29 @@
+1 | Projeto Medicina - www.projetomedicina.com.br
+
+3) (UFES-2001) Observe a figura abaixo e considere a distribuicao de energia solar na Terra.
+a) o item A da figura demonstra o equinocio de primavera.
+b) o item B da figura demonstra o solsticio de verao.
+c) a inclinacao do eixo de rotacao determina as estacoes do ano.
+d) quanto mais nos afastamos do Equador, maior a inclinacao dos raios solares.
+e) no solsticio de verao, o dia e mais curto e a noite e mais longa.
+
+11) (PUC-SP-2000) Os dados apresentados na tabela mostram alguns satelites em operacao.
+ALGUNS SATELITES EM OPERACAO
+Satelite Altitude Funcao Ciclo orbital Area coberta
+Landsat 705 Recobrimento da superficie 16 dias Faixa de 185 km
+Spot 832 Recobrimento da superficie 26 dias Duas faixas de 60 km
+Noaa 1500 Meteorologico 12 horas Faixa de 3000 km
+Leia atentamente as afirmacoes abaixo:
+1. Analisando-se a tabela, nota-se que os satelites tem funcoes diferenciadas.
+2. Os satelites que recobrem a superficie permitem observar queimadas e erosao.
+3. Os satelites podem ajudar na previsao de fenomenos climaticos.
+Assinale a alternativa que contem a(s) afirmacao(oes) correta(s).
+A) Todas sao corretas.
+B) Somente a 2 e a 3 sao corretas.
+C) Somente a 1 e a 2 sao corretas.
+D) Somente a 2 e correta.
+E) Somente a 1 e a 3 sao corretas.
+
+GABARITO
+3) Alternativa: E
+11) Alternativa: A

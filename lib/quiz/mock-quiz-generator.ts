@@ -1506,7 +1506,7 @@ function validateReadyDraft(question: QuestionDraft) {
   }
 
   if (question.type === "MATCHING") {
-    return (question.matchingPairs ?? []).length >= 2;
+    return validateMatchingQuestion(question);
   }
 
   if (question.type === "FLASHCARD" || question.type === "REVEAL_ANSWER") {
@@ -1514,6 +1514,14 @@ function validateReadyDraft(question: QuestionDraft) {
   }
 
   return false;
+}
+
+function validateMatchingQuestion(question: QuestionDraft) {
+  return (
+    question.type === "MATCHING" &&
+    (question.matchingPairs ?? []).length >= 2 &&
+    (question.matchingPairs ?? []).every((pair) => Boolean(pair.left?.trim()) && Boolean(pair.right?.trim()))
+  );
 }
 
 function dedupeQuestionDrafts(questions: QuestionDraft[]) {
@@ -1534,8 +1542,10 @@ function dedupeQuestionDrafts(questions: QuestionDraft[]) {
 }
 
 function parseReadyQuestionDrafts(text: string, structuredQuestions: ParsedStructuredQuestion[]) {
+  const matchingQuestions = parseMatchingQuestionDrafts(text);
+
   return dedupeQuestionDrafts([
-    ...parseMatchingQuestionDrafts(text),
+    ...matchingQuestions,
     ...parseReadyMultipleChoiceDrafts(text),
     ...parseColumnMatchingDrafts(text),
     ...buildAssociationDraftsFromStructured(structuredQuestions),
@@ -2058,6 +2068,7 @@ function analyzeDocument(document: Document): DocumentAnalysis {
   const structuredQuestions = parseStructuredQuestionnaire(document.cleanedText).filter(isUsableStructuredQuestion);
   const structuredDrafts = parseReadyQuestionDrafts(document.cleanedText, structuredQuestions);
   const capabilities = computeStudyBankCapabilities(structuredDrafts);
+  console.info("[study-bank] capabilities:", capabilities);
   const sections = extractSections(document.cleanedText);
   const trueFalseCount = structuredDrafts.filter((question) => question.type === "TRUE_FALSE").length;
   const flashcardCount = structuredDrafts.filter((question) => question.type === "FLASHCARD").length;

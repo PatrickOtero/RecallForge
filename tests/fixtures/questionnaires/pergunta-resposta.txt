@@ -1,0 +1,5 @@
+Pergunta:
+O que é inventário?
+
+Resposta:
+Contagem física comparada com o estoque lógico.

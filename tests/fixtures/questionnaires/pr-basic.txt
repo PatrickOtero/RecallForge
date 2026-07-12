@@ -1,0 +1,5 @@
+P: O que é ruptura?
+R: Falta de produto no momento da compra.
+
+P: O que é cobertura?
+R: Quantidade de dias que o estoque atual suporta.

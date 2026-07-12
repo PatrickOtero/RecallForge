@@ -1,3 +1,6 @@
+import type { ImportCandidate, ImportReport } from "@/lib/questionnaire-import/types";
+export type { ImportCandidate, ImportReport } from "@/lib/questionnaire-import/types";
+
 export const quizModes = [
   "QUICK_REVIEW",
   "DEEP_DIVE",
@@ -8,6 +11,7 @@ export const quizModes = [
 
 export const questionTypes = [
   "MULTIPLE_CHOICE",
+  "MULTI_SELECT",
   "TRUE_FALSE",
   "FILL_BLANK",
   "SHORT_ANSWER",
@@ -73,6 +77,7 @@ export interface QuizCompositionOption {
 export interface QuestionChoice {
   id: string;
   label: string;
+  isCorrect?: boolean;
 }
 
 export interface MatchingPair {
@@ -165,7 +170,13 @@ export interface RecentSessionSummary {
 
 export interface IngestDocumentResponse {
   document: Document;
+  report: ImportReport;
+}
+
+export interface ConfirmImportResponse {
   options: QuizModeOption[];
+  validQuestions: number;
+  candidates: ImportCandidate[];
 }
 
 export interface CreateQuizSessionResponse {

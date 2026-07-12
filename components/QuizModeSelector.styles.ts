@@ -9,6 +9,8 @@ export const quizModeSelectorStyles = {
   metadataCard: "rounded-md bg-slate-50 px-4 py-3",
   metadataLabel: "text-xs uppercase tracking-[0.2em] text-slate-400",
   metadataValue: "mt-1 text-sm font-semibold text-slate-700",
+  importBreakdown: "mt-5 flex flex-wrap gap-2",
+  importChip: "rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1 text-xs font-medium text-cyan-700",
   backButton:
     "rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900",
 };

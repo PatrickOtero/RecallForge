@@ -1,0 +1,5 @@
+Frente: Ruptura
+Verso: Falta de produto no momento da compra.
+
+Termo: Estoque padrão final
+Definição: Resultado da fórmula usada para sugerir pedido.

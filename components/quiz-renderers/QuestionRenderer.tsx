@@ -2,6 +2,7 @@ import { FillBlankQuestion } from "@/components/FillBlankQuestion";
 import { FlashcardQuestion } from "@/components/FlashcardQuestion";
 import { MatchingQuestion } from "@/components/MatchingQuestion";
 import { MultipleChoiceQuestion } from "@/components/MultipleChoiceQuestion";
+import { MultiSelectQuestion } from "@/components/MultiSelectQuestion";
 import { TrueFalseQuestion } from "@/components/TrueFalseQuestion";
 import type { AnswerAttempt, FlashcardRating, Question } from "@/lib/types";
 
@@ -27,6 +28,17 @@ export function QuestionRenderer({ attempt, disabled, onSubmit, question }: Ques
   if (question.type === "MATCHING") {
     return (
       <MatchingQuestion
+        attempt={attempt}
+        disabled={disabled}
+        onSubmit={(responseText) => onSubmit({ responseText })}
+        question={question}
+      />
+    );
+  }
+
+  if (question.type === "MULTI_SELECT") {
+    return (
+      <MultiSelectQuestion
         attempt={attempt}
         disabled={disabled}
         onSubmit={(responseText) => onSubmit({ responseText })}

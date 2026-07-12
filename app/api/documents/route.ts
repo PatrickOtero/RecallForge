@@ -1,10 +1,7 @@
 import { extractTextFromDocx, extractTextFromPdf, extractTextFromTxt } from "@/lib/documents/text-extraction";
-import { cleanExtractedText, splitTextIntoChunks } from "@/lib/normalization/text-normalizer";
+import { splitTextIntoChunks } from "@/lib/normalization/text-normalizer";
 import { prisma } from "@/lib/prisma";
-import {
-  detectStructuredQuestionnaire,
-  generateQuizOptions,
-} from "@/lib/quiz/mock-quiz-generator";
+import { buildImportReport, normalizeQuestionnaireInput } from "@/lib/questionnaire-import";
 import { serializeDocument } from "@/lib/serializers";
 import type { DocumentSource } from "@/lib/types";
 import {
@@ -23,7 +20,7 @@ function invalidQuestionnaireResponse() {
   return Response.json(
     {
       error:
-        "Este material não parece estar em formato de questionário. O RecallForge trabalha com questionários prontos. Envie perguntas e respostas, alternativas com gabarito, verdadeiro/falso, associação ou pares de frente e verso.",
+        "Não encontramos perguntas suficientes para montar uma prévia confiável. Revise o material ou tente outro arquivo.",
     },
     { status: 400 },
   );
@@ -77,14 +74,13 @@ export async function POST(request: Request) {
       return Response.json({ error: textError }, { status: 400 });
     }
 
-    sourceType = "MANUAL_TEXT";
     rawText = manualText;
   }
 
-  const cleanedText = cleanExtractedText(rawText);
-  const hasStructuredQuestionnaire = detectStructuredQuestionnaire(cleanedText);
+  const cleanedText = normalizeQuestionnaireInput(rawText);
+  const report = buildImportReport(rawText);
 
-  if (cleanedText.length < MIN_TEXT_LENGTH && !hasStructuredQuestionnaire) {
+  if (cleanedText.length < MIN_TEXT_LENGTH && report.totalCandidates === 0) {
     return Response.json(
       {
         error: buildExtractionFailureMessage(sourceType),
@@ -93,7 +89,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!hasStructuredQuestionnaire) {
+  if (report.totalCandidates === 0) {
     return invalidQuestionnaireResponse();
   }
 
@@ -111,10 +107,8 @@ export async function POST(request: Request) {
     },
   });
 
-  const document = serializeDocument(savedDocument);
-
   return Response.json({
-    document,
-    options: generateQuizOptions(document),
+    document: serializeDocument(savedDocument),
+    report,
   });
 }
