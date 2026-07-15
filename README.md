@@ -22,7 +22,6 @@ Com o RecallForge, o usuário pode:
 - colar conteúdo diretamente na aplicação;
 - revisar perguntas antes de adicioná-las ao material;
 - praticar o mesmo conteúdo em diferentes modos;
-- alternar entre tipos de questão sem reenviar o arquivo;
 - utilizar questionários com múltipla escolha, verdadeiro ou falso, associação e flashcards;
 - manter o conteúdo organizado em uma interface simples e responsiva.
 
@@ -31,8 +30,6 @@ Com o RecallForge, o usuário pode:
 ## Principais recursos
 
 ### Importação de materiais
-
-A aplicação aceita conteúdos enviados por arquivo ou texto colado, preservando acentuação e estrutura sempre que possível.
 
 Formatos suportados:
 
@@ -53,7 +50,6 @@ O mesmo material pode ser praticado em diferentes formatos:
 - **Verdadeiro ou falso**
 - **Associação**
 - **Flashcards**
-- **Revelar resposta**
 
 ### Questionários estruturados
 
@@ -136,20 +132,6 @@ Verso: Brasília
 ├── package.json
 └── README.md
 ```
-
----
-
-## Objetivos do projeto
-
-O RecallForge busca oferecer:
-
-- criação rápida de materiais de estudo;
-- menor dependência de edição manual;
-- revisão antes da importação;
-- reaproveitamento do mesmo conteúdo em vários modos;
-- interface limpa e acessível;
-- processamento previsível e confiável;
-- suporte a questionários reais, inclusive materiais longos e variados.
 
 ---
 
