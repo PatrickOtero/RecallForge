@@ -7,7 +7,7 @@ O **RecallForge** é uma aplicação web criada para converter conteúdos estrut
 O projeto foi pensado para reduzir o trabalho manual de montar questionários, preservando o controle do usuário sobre o material final.
 
 <p align="center">
-  <img src="docs/recallforge-dashboard.png" alt="Tela principal do RecallForge" width="100%">
+  <img src="public/recallforge-dashboard.png" alt="Tela principal do RecallForge" width="100%">
 </p>
 
 
